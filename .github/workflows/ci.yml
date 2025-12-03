@@ -1,4 +1,4 @@
-name: Stylized Benchmark CI
+name: Cryptography ci
 
 on:
   push:
@@ -25,7 +25,7 @@ jobs:
       - name: Build release
         run: cargo build --release
 
-  tests:
+  test_default:
     runs-on: ubuntu-latest
     needs: prepare
     steps:
@@ -35,12 +35,19 @@ jobs:
       - name: Run tests (default)
         run: cargo test --verbose
 
+  test_speed:
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Run tests (speed)
         run: cargo test --verbose --features speed
 
   bench_default:
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: [test_default, test_speed]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -68,7 +75,7 @@ jobs:
 
   bench_speed:
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: [test_default, test_speed]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -96,7 +103,7 @@ jobs:
 
   bench_ref:
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: [test_default, test_speed]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
