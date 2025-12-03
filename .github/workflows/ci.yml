@@ -1,11 +1,11 @@
-name: Cryptography ci
+name: Cryptography CI
 
 on:
   push:
   pull_request:
 
 jobs:
-  prepare:
+  build_libs:
     runs-on: ubuntu-latest
     outputs:
       crate-name: ${{ steps.getcrate.outputs.name }}
@@ -22,34 +22,51 @@ jobs:
           NAME=$(grep '^name' Cargo.toml | head -1 | cut -d'"' -f2)
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Build release
+      - name: Build default
         run: cargo build --release
-
-      - name: Upload library artifact
+      - name: Save default
         run: |
-          CRATE=$(grep '^name' Cargo.toml | head -1 | cut -d'"' -f2)
-          LIB=$(ls -1t target/release/deps/lib${CRATE}-*.rlib | head -1)
-          mkdir -p artifact_lib
-          cp "$LIB" artifact_lib/
-        shell: bash
-
+          mkdir -p lib_default
+          cp target/release/deps/lib*.rlib lib_default/
       - uses: actions/upload-artifact@v4
         with:
-          name: library
-          path: artifact_lib/
+          name: lib_default
+          path: lib_default/
+
+      - name: Build speed
+        run: cargo build --release --features speed
+      - name: Save speed
+        run: |
+          mkdir -p lib_speed
+          cp target/release/deps/lib*.rlib lib_speed/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lib_speed
+          path: lib_speed/
+
+      - name: Build ref
+        run: cargo build --release --benches
+      - name: Save ref
+        run: |
+          mkdir -p lib_ref
+          cp target/release/deps/lib*.rlib lib_ref/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lib_ref
+          path: lib_ref/
 
   test_default:
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: build_libs
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Run tests (default)
+      - name: Run tests
         run: cargo test --verbose
 
   test_speed:
     runs-on: ubuntu-latest
-    needs: prepare
+    needs: build_libs
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -58,28 +75,26 @@ jobs:
 
   bench_default:
     runs-on: ubuntu-latest
-    needs: [prepare, test_default, test_speed]
+    needs: [build_libs, test_default, test_speed]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-
       - name: Run Classic 256
         run: cargo bench --bench sha256
 
-      - name: Download library
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: library
-          path: libdl
+          name: lib_default
+          path: lib
 
       - name: Extract mean
         run: |
           M=$(jq '.mean.point_estimate' target/criterion/sha256/new/estimates.json)
           echo $M > mean.txt
 
-      - name: Extract lib size
+      - name: Extract size
         run: |
-          LIB=$(ls -1t libdl/lib*.rlib | head -1)
+          LIB=$(ls -1t lib/lib*.rlib | head -1)
           stat -c %s "$LIB" > size.txt
 
       - uses: actions/upload-artifact@v4
@@ -91,28 +106,26 @@ jobs:
 
   bench_speed:
     runs-on: ubuntu-latest
-    needs: [prepare, test_default, test_speed]
+    needs: [build_libs, test_default, test_speed]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-
       - name: Run Turbo 256
         run: cargo bench --bench sha256 --features speed
 
-      - name: Download library
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: library
-          path: libdl
+          name: lib_speed
+          path: lib
 
       - name: Extract mean
         run: |
           M=$(jq '.mean.point_estimate' target/criterion/sha256/new/estimates.json)
           echo $M > mean.txt
 
-      - name: Extract lib size
+      - name: Extract size
         run: |
-          LIB=$(ls -1t libdl/lib*.rlib | head -1)
+          LIB=$(ls -1t lib/lib*.rlib | head -1)
           stat -c %s "$LIB" > size.txt
 
       - uses: actions/upload-artifact@v4
@@ -124,28 +137,26 @@ jobs:
 
   bench_ref:
     runs-on: ubuntu-latest
-    needs: [prepare, test_default, test_speed]
+    needs: [build_libs, test_default, test_speed]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-
       - name: Run Reference 256
         run: cargo bench --bench sha256_ref
 
-      - name: Download library
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: library
-          path: libdl
+          name: lib_ref
+          path: lib
 
       - name: Extract mean
         run: |
           M=$(jq '.mean.point_estimate' target/criterion/sha256_ref/new/estimates.json)
           echo $M > mean.txt
 
-      - name: Extract lib size
+      - name: Extract size
         run: |
-          LIB=$(ls -1t libdl/lib*.rlib | head -1)
+          LIB=$(ls -1t lib/lib*.rlib | head -1)
           stat -c %s "$LIB" > size.txt
 
       - uses: actions/upload-artifact@v4
@@ -159,10 +170,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [bench_default, bench_speed, bench_ref]
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
 
-      - name: Print summary table
+      - name: Print summary
         run: |
           M_DEF=$(cat classic256/mean.txt)
           S_DEF=$(cat classic256/size.txt)
