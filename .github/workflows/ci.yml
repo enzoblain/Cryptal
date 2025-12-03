@@ -33,11 +33,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Run Classic 256
-        run: cargo bench --bench benchmark_256
+        run: cargo bench --bench benchmark_sha_256
 
       - name: Extract mean
         run: |
-          M=$(jq '.mean.point_estimate' target/criterion/benchmark_256_default/new/estimates.json)
+          M=$(jq '.mean.point_estimate' target/criterion/benchmark_sha_256_default/new/estimates.json)
           echo $M > mean.txt
 
       - name: Extract lib size
@@ -61,11 +61,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Run Turbo 256
-        run: cargo bench --bench benchmark_256 --features speed
+        run: cargo bench --bench benchmark_sha_256 --features speed
 
       - name: Extract mean
         run: |
-          M=$(jq '.mean.point_estimate' target/criterion/benchmark_256_speed/new/estimates.json)
+          M=$(jq '.mean.point_estimate' target/criterion/benchmark_sha_256_speed/new/estimates.json)
           echo $M > mean.txt
 
       - name: Extract lib size
@@ -89,11 +89,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Run Reference 256
-        run: cargo bench --bench benchmark_256_ref
+        run: cargo bench --bench benchmark_sha_256_ref
 
       - name: Extract mean
         run: |
-          M=$(jq '.mean.point_estimate' target/criterion/benchmark_256_ref/new/estimates.json)
+          M=$(jq '.mean.point_estimate' target/criterion/benchmark_sha_256_ref/new/estimates.json)
           echo $M > mean.txt
 
       - name: Extract lib size
