@@ -1,48 +1,137 @@
-name: Build, Lint and Test
+name: Stylized Benchmark CI
 
 on:
   push:
-    branches: [ main ]
   pull_request:
-    branches: [ main ]
 
 jobs:
-  ci:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      crate-name: ${{ steps.getcrate.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Get crate name
+        id: getcrate
+        run: |
+          NAME=$(grep '^name' Cargo.toml | head -1 | cut -d'"' -f2)
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Build release
+        run: cargo build --release
+
+  bench_default:
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Classic 256
+        run: cargo bench --bench benchmark_256
+
+      - name: Extract mean
+        run: |
+          M=$(jq '.mean.point_estimate' target/criterion/benchmark_256_default/new/estimates.json)
+          echo $M > mean.txt
+
+      - name: Extract lib size
+        run: |
+          CRATE=${{ needs.prepare.outputs.crate-name }}
+          LIB=$(ls -1t target/release/deps/lib${CRATE}-*.rlib | head -1)
+          stat -c %s "$LIB" > size.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: classic256
+          path: |
+            mean.txt
+            size.txt
+
+  bench_speed:
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Turbo 256
+        run: cargo bench --bench benchmark_256 --features speed
+
+      - name: Extract mean
+        run: |
+          M=$(jq '.mean.point_estimate' target/criterion/benchmark_256_speed/new/estimates.json)
+          echo $M > mean.txt
+
+      - name: Extract lib size
+        run: |
+          CRATE=${{ needs.prepare.outputs.crate-name }}
+          LIB=$(ls -1t target/release/deps/lib${CRATE}-*.rlib | head -1)
+          stat -c %s "$LIB" > size.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turbo256
+          path: |
+            mean.txt
+            size.txt
+
+  bench_ref:
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Reference 256
+        run: cargo bench --bench benchmark_256_ref
+
+      - name: Extract mean
+        run: |
+          M=$(jq '.mean.point_estimate' target/criterion/benchmark_256_ref/new/estimates.json)
+          echo $M > mean.txt
+
+      - name: Extract lib size
+        run: |
+          CRATE=${{ needs.prepare.outputs.crate-name }}
+          LIB=$(ls -1t target/release/deps/lib${CRATE}-*.rlib | head -1)
+          stat -c %s "$LIB" > size.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ref256
+          path: |
+            mean.txt
+            size.txt
+
+  summary:
+    runs-on: ubuntu-latest
+    needs: [bench_default, bench_speed, bench_ref]
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
 
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
-          profile: minimal
+      - name: Print summary table
+        run: |
+          M_DEF=$(cat classic256/mean.txt)
+          S_DEF=$(cat classic256/size.txt)
 
-      - name: Cache Cargo registry and build
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          M_SPD=$(cat turbo256/mean.txt)
+          S_SPD=$(cat turbo256/size.txt)
 
-      - name: Format check
-        run: cargo fmt --all -- --check
+          M_REF=$(cat ref256/mean.txt)
+          S_REF=$(cat ref256/size.txt)
 
-      - name: Clippy (all-features)
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Build (all features)
-        run: cargo build --all-features --verbose
-
-      - name: Test (default features)
-        run: cargo test --verbose
-
-      - name: Test (with speed feature)
-        run: cargo test --features speed --verbose
+          echo
+          echo "=== Performance Summary ==="
+          printf "%-20s | %-12s | %-12s\n" "Version" "Speed" "Size"
+          printf "%-20s-+-%-12s-+-%-12s\n" "--------------------" "------------" "------------"
+          printf "%-20s | %-12s | %-12s\n" "Classic 256" "$M_DEF" "$S_DEF"
+          printf "%-20s | %-12s | %-12s\n" "Turbo 256"   "$M_SPD" "$S_SPD"
+          printf "%-20s | %-12s | %-12s\n" "Reference 256" "$M_REF" "$S_REF"
