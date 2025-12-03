@@ -25,7 +25,11 @@ split-debuginfo = "unpacked"
 strip = "none"
 
 [[bench]]
-name = "benchmark_sha256"
+name = "sha256"
+harness = false
+
+[[bench]]
+name = "sha256_ref"
 harness = false
 
 [features]
