@@ -31,7 +31,7 @@ pub fn maj(a: u32, b: u32, c: u32) -> u32 {
 }
 
 #[cfg(not(feature = "speed"))]
-pub fn all_rounds(state: &mut [u32; 8], mut w: [u32; 64]) {
+pub fn all_rounds(state: &mut [u32; 8], mut w: [u32; 16]) {
     let mut a = state[0];
     let mut b = state[1];
     let mut c = state[2];
@@ -43,18 +43,36 @@ pub fn all_rounds(state: &mut [u32; 8], mut w: [u32; 64]) {
 
     for i in 0..64 {
         if i >= 16 {
-            w[i] = (w[i - 16])
-                .wrapping_add(small_sigma0(w[i - 15]))
-                .wrapping_add(w[i - 7])
-                .wrapping_add(small_sigma1(w[i - 2]));
+            unsafe {
+                let w16 = *w.get_unchecked((i - 16) & 15);
+                let w15 = *w.get_unchecked((i - 15) & 15);
+                let w7 = *w.get_unchecked((i - 7) & 15);
+                let w2 = *w.get_unchecked((i - 2) & 15);
+
+                let s0 = small_sigma0(w15);
+                let s1 = small_sigma1(w2);
+
+                *w.get_unchecked_mut(i & 15) =
+                    w16.wrapping_add(s0).wrapping_add(w7).wrapping_add(s1);
+            }
         }
 
+        let wi = unsafe { *w.get_unchecked(i & 15) };
+        let ki = unsafe { *K256.get_unchecked(i) };
+
+        let bs1 = big_sigma1(e);
+        let ch = ch(e, f, g);
+
+        let bs0 = big_sigma0(a);
+        let maj = maj(a, b, c);
+
         let t1 = h
-            .wrapping_add(big_sigma1(e))
-            .wrapping_add(ch(e, f, g))
-            .wrapping_add(K256[i])
-            .wrapping_add(w[i]);
-        let t2 = big_sigma0(a).wrapping_add(maj(a, b, c));
+            .wrapping_add(bs1)
+            .wrapping_add(ch)
+            .wrapping_add(wi)
+            .wrapping_add(ki);
+
+        let t2 = bs0.wrapping_add(maj);
 
         h = g;
         g = f;
@@ -77,7 +95,7 @@ pub fn all_rounds(state: &mut [u32; 8], mut w: [u32; 64]) {
 }
 
 #[cfg(feature = "speed")]
-pub fn all_rounds(state: &mut [u32; 8], w: &mut [u32; 64]) {
+pub fn all_rounds(state: &mut [u32; 8], w: &mut [u32; 16]) {
     let mut a = state[0];
     let mut b = state[1];
     let mut c = state[2];
@@ -90,19 +108,36 @@ pub fn all_rounds(state: &mut [u32; 8], w: &mut [u32; 64]) {
     macro_rules! R {
         ($i:expr) => {{
             if $i >= 16 {
-                w[$i] = small_sigma1(w[$i - 2])
-                    .wrapping_add(w[$i - 7])
-                    .wrapping_add(small_sigma0(w[$i - 15]))
-                    .wrapping_add(w[$i - 16]);
+                unsafe {
+                    let w16 = *w.get_unchecked(($i - 16) & 15);
+                    let w15 = *w.get_unchecked(($i - 15) & 15);
+                    let w7 = *w.get_unchecked(($i - 7) & 15);
+                    let w2 = *w.get_unchecked(($i - 2) & 15);
+
+                    let s0 = small_sigma0(w15);
+                    let s1 = small_sigma1(w2);
+
+                    *w.get_unchecked_mut($i & 15) =
+                        w16.wrapping_add(s0).wrapping_add(w7).wrapping_add(s1);
+                }
             }
 
-            let t1 = h
-                .wrapping_add(big_sigma1(e))
-                .wrapping_add(ch(e, f, g))
-                .wrapping_add(w[$i])
-                .wrapping_add(K256[$i]);
+            let wi = unsafe { *w.get_unchecked($i & 15) };
+            let ki = unsafe { *K256.get_unchecked($i) };
 
-            let t2 = big_sigma0(a).wrapping_add(maj(a, b, c));
+            let bs1 = big_sigma1(e);
+            let ch = ch(e, f, g);
+
+            let bs0 = big_sigma0(a);
+            let maj = maj(a, b, c);
+
+            let t1 = h
+                .wrapping_add(bs1)
+                .wrapping_add(ch)
+                .wrapping_add(wi)
+                .wrapping_add(ki);
+
+            let t2 = bs0.wrapping_add(maj);
 
             h = g;
             g = f;
