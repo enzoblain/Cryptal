@@ -2,22 +2,19 @@ use super::H256_INIT;
 use super::computations::all_rounds;
 use crate::primitives::U256;
 
-use core::ptr::read_unaligned;
-
 #[inline(always)]
 pub fn compress(block: &[u8; 64], state: &mut [u32; 8]) {
     let mut w = [0u32; 64];
 
-    let bp = block.as_ptr();
-    let wp = w.as_mut_ptr();
     for i in 0..16 {
-        unsafe {
-            let p = bp.add(i * 4) as *const u32;
-            let v = u32::from_be(read_unaligned(p));
-            wp.add(i).write(v);
-        }
+        let bytes = &block[i * 4..i * 4 + 4];
+        w[i] = u32::from_be_bytes(bytes.try_into().unwrap());
     }
 
+    #[cfg(not(feature = "speed"))]
+    all_rounds(state, w);
+
+    #[cfg(feature = "speed")]
     all_rounds(state, &mut w);
 }
 
