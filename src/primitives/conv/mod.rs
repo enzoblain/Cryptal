@@ -1,3 +1,7 @@
+//! Conversion helpers for `U256` to and from integer widths.
+//!
+//! Split by source width to keep `no_std` builds small.
+
 use super::U256;
 
 pub mod u128;
