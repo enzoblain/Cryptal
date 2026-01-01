@@ -1,21 +1,17 @@
-//! Conversions between `U256` and `u128` (and arrays of 128-bit halves).
+use crate::primitives::U256;
 
-use super::U256;
-
-/// Splits a `U256` into two big-endian `u128` halves.
 impl From<U256> for [u128; 2] {
     fn from(value: U256) -> Self {
-        let mut hi = [0u8; 16];
-        let mut lo = [0u8; 16];
+        let mut high = [0u8; 16];
+        let mut low = [0u8; 16];
 
-        hi.copy_from_slice(&value.0[..16]);
-        lo.copy_from_slice(&value.0[16..]);
+        high.copy_from_slice(&value.0[..16]);
+        low.copy_from_slice(&value.0[16..]);
 
-        [u128::from_be_bytes(hi), u128::from_be_bytes(lo)]
+        [u128::from_be_bytes(high), u128::from_be_bytes(low)]
     }
 }
 
-/// Builds a `U256` from two big-endian `u128` halves.
 impl From<[u128; 2]> for U256 {
     fn from(value: [u128; 2]) -> Self {
         let mut out = [0u8; 32];
@@ -27,7 +23,6 @@ impl From<[u128; 2]> for U256 {
     }
 }
 
-/// Attempts to downcast a `U256` into `u128` (fails if high bytes are non-zero).
 impl TryFrom<U256> for u128 {
     type Error = ();
 
@@ -43,7 +38,6 @@ impl TryFrom<U256> for u128 {
     }
 }
 
-/// Promotes a `u128` into big-endian `U256`.
 impl From<u128> for U256 {
     fn from(value: u128) -> Self {
         let mut out = [0u8; 32];

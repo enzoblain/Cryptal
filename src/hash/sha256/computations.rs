@@ -1,180 +1,35 @@
-//! | `maj` | Majority function | (a ∧ b) ⊕ (a ∧ c) ⊕ (b ∧ c) |
-
-/// SHA-256 computation functions and round operations.
-///
-/// Ce module fournit les helpers bas-niveau pour la compression SHA-256 : opérations bitwise,
-/// boucle principale 64 tours, etc.
-///
-/// # Opérations bitwise
-///
-/// | Fonction        | Rôle             | Formule                                 |
-/// |-----------------|------------------|-----------------------------------------|
-/// | `small_sigma0`  | Expansion mot    | ROTR(7) ^ ROTR(18) ^ SHR(3)             |
-/// | `small_sigma1`  | Expansion mot    | ROTR(17) ^ ROTR(19) ^ SHR(10)           |
-/// | `big_sigma0`    | Rotation état    | ROTR(2) ^ ROTR(13) ^ ROTR(22)           |
-/// | `big_sigma1`    | Rotation état    | ROTR(6) ^ ROTR(11) ^ ROTR(25)           |
-/// | `ch`            | Choix            | (e & f) ^ (!e & g)                      |
-/// | `maj`           | Majorité         | (a & b) ^ (a & c) ^ (b & c)              |
-///
-/// # Références
-///
-/// - FIPS 180-4: Secure Hash Standard (SHS)
-/// - IEEE 754: Floating-point standard
 use crate::hash::sha256::K256;
-/// Computes the SHA-256 small sigma0 function.
-///
-/// Used in word schedule expansion (W[t] calculation).
-///
-/// # Formula
-///
-/// Σ₀(x) = ROTR(7, x) ⊕ ROTR(18, x) ⊕ SHR(3, x)
-///
-/// Where ROTR is rotate right, SHR is shift right, and ⊕ is XOR.
-///
-/// # Arguments
-///
-/// * `x` - Input 32-bit value
-///
-/// # Returns
-///
-/// Result of the small sigma0 operation
+
 #[inline(always)]
 pub fn small_sigma0(x: u32) -> u32 {
     x.rotate_right(7) ^ x.rotate_right(18) ^ (x >> 3)
 }
 
-/// Computes the SHA-256 small sigma1 function.
-///
-/// Used in word schedule expansion (W[t] calculation).
-///
-/// # Formula
-///
-/// Σ₁(x) = ROTR(17, x) ⊕ ROTR(19, x) ⊕ SHR(10, x)
-///
-/// Where ROTR is rotate right, SHR is shift right, and ⊕ is XOR.
-///
-/// # Arguments
-///
-/// * `x` - Input 32-bit value
-///
-/// # Returns
-///
-/// Result of the small sigma1 operation
 #[inline(always)]
 pub fn small_sigma1(x: u32) -> u32 {
     x.rotate_right(17) ^ x.rotate_right(19) ^ (x >> 10)
 }
 
-/// Computes the SHA-256 big sigma0 function.
-///
-/// Used in the main compression loop for state updates.
-///
-/// # Formula
-///
-/// Σ₀(x) = ROTR(2, x) ⊕ ROTR(13, x) ⊕ ROTR(22, x)
-///
-/// Where ROTR is rotate right and ⊕ is XOR.
-///
-/// # Arguments
-///
-/// * `x` - Input 32-bit value
-///
-/// # Returns
-///
-/// Result of the big sigma0 operation
 #[inline(always)]
 pub fn big_sigma0(x: u32) -> u32 {
     x.rotate_right(2) ^ x.rotate_right(13) ^ x.rotate_right(22)
 }
 
-/// Computes the SHA-256 big sigma1 function.
-///
-/// Used in the main compression loop for state updates.
-///
-/// # Formula
-///
-/// Σ₁(x) = ROTR(6, x) ⊕ ROTR(11, x) ⊕ ROTR(25, x)
-///
-/// Where ROTR is rotate right and ⊕ is XOR.
-///
-/// # Arguments
-///
-/// * `x` - Input 32-bit value
-///
-/// # Returns
-///
-/// Result of the big sigma1 operation
 #[inline(always)]
 pub fn big_sigma1(x: u32) -> u32 {
     x.rotate_right(6) ^ x.rotate_right(11) ^ x.rotate_right(25)
 }
 
-/// Computes the SHA-256 choice function.
-///
-/// Selects bits from `f` where `e` is 1, and bits from `g` where `e` is 0.
-///
-/// # Formula
-///
-/// Ch(e, f, g) = (e ∧ f) ⊕ (¬e ∧ g)
-///
-/// Where ∧ is bitwise AND, ¬ is bitwise NOT, and ⊕ is XOR.
-///
-/// # Arguments
-///
-/// * `e` - Selector value (32-bit)
-/// * `f` - First choice value (32-bit)
-/// * `g` - Second choice value (32-bit)
-///
-/// # Returns
-///
-/// Result of the choice operation
 #[inline(always)]
 pub fn ch(e: u32, f: u32, g: u32) -> u32 {
     (e & f) ^ ((!e) & g)
 }
 
-/// Computes the SHA-256 majority function.
-///
-/// Returns the majority bit for each bit position across the three inputs.
-///
-/// # Formula
-///
-/// Maj(a, b, c) = (a ∧ b) ⊕ (a ∧ c) ⊕ (b ∧ c)
-///
-/// Where ∧ is bitwise AND and ⊕ is XOR.
-///
-/// # Arguments
-///
-/// * `a` - First input (32-bit)
-/// * `b` - Second input (32-bit)
-/// * `c` - Third input (32-bit)
-///
-/// # Returns
-///
-/// Result of the majority operation
 #[inline(always)]
 pub fn maj(a: u32, b: u32, c: u32) -> u32 {
     (a & b) ^ (a & c) ^ (b & c)
 }
 
-/// Executes all 64 rounds of the SHA-256 compression function.
-///
-/// Standard SHA-256 implementation that computes the 64 rounds through a loop.
-///
-/// # Algorithm
-///
-/// The function maintains 8 working variables (a-h) and performs 64 rounds:
-///
-/// For each round i (0..64):
-/// 1. If i >= 16: Expand the message schedule: W[i] = σ₁(W[i-2]) + W[i-7] + σ₀(W[i-15]) + W[i-16]
-/// 2. Calculate: T1 = h + Σ₁(e) + Ch(e,f,g) + K[i] + W[i]
-/// 3. Calculate: T2 = Σ₀(a) + Maj(a,b,c)
-/// 4. Update: a←T1+T2, e←d+T1, and rotate other variables
-///
-/// # Arguments
-///
-/// * `state` - Current hash state [a, b, c, d, e, f, g, h], updated in-place
-/// * `w` - Message schedule array (16 values, circular buffer)
 pub fn all_rounds(state: &mut [u32; 8], mut w: [u32; 16]) {
     // Load hash state into working variables
     let mut a = state[0];

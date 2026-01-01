@@ -1,53 +1,77 @@
-# 🔐 Cryptography
+# 🔐 Cryptal
 
-[![Docs.rs](https://img.shields.io/badge/docs.rs-documentation-blue.svg)](https://docs.rs/Cryptography)  
 [![License](https://img.shields.io/badge/license-SSPL-blue.svg)](LICENSE)
+![Dev Rust](https://img.shields.io/badge/Developed%20with-Rust%201.92.0-orange)
+[![CI](https://github.com/enzoblain/Cryptogral/actions/workflows/ci.yml/badge.svg)](https://github.com/enzoblain/Cryptal/actions/workflows/ci.yml)
 
-**Cryptography** is the dedicated cryptographic backend for the **Nebula** ecosystem.  
-It provides fast, lightweight and minimal cryptographic primitives designed to be fully independent from the network layer.
-
-💡 *This crate is built to evolve over time without requiring changes to Nebula itself.*
+**Cryptal** is the dedicated cryptographic utility for the ***Nebula*** ecosystem, providing only the essential primitives required by the platform.
 
 ---
 
-## ✨ Features
+## 📊 Project Status
 
-Current implementations:
+- [x] **Hashing & Arithmetic**
+  - [x] SHA-256 (integrity, identifiers)
+  - [x] U256 (large integers)
 
-- ⚡ **SHA-256 hashing** — pure safe Rust implementation 
-- 🔢 **U256** — a 256-bit unsigned integer type with safe arithmetic operations
+- [ ] **Encryption**
+  - [ ] ChaCha20-Poly1305 (confidentiality, integrity)
 
-Planned additions:
+- [ ] **Key Management**
+  - [ ] Argon2id (password → key)
+  - [ ] CSPRNG (secure randomness)
 
-- 🔒 More hashing algorithms  
-- 🔑 Asymmetric key primitives  
-- ✍️ Signature schemes  
-- 🎲 Secure randomness utilities  
-- 🧱 Additional building blocks for cryptographic protocols  
+- [ ] **Public-Key Cryptography**
+  - [ ] Ed25519 (signatures, identity)
+  - [ ] X25519 (key exchange)
+
+- [ ] **Secret Management**
+  - [ ] Shamir’s Secret Sharing (recovery, multi-device)
 
 ---
 
 ## 🚀 Getting Started
 
-This crate is not published on crates.io.  
-Add it directly from GitHub:
+This crate is not yet published on crates.io. Add it directly from GitHub:
 
 ``` toml
 [dependencies]
-cryptography = { git = "https://github.com/enzoblain/Cryptography" }
+cryptal = { git = "https://github.com/enzoblain/Cryptal" }
 ```
 
 ---
 
-## 📚 Documentation
+## 📝 Example: SHA-256 Hash
 
-Generate the documentation locally:
+Hash a message using the SHA-256 implementation:
 
-```bash
-cargo doc --open
+```rust
+use cryptal::hash::sha256;
+
+fn main() {
+	let input: &[u8] = b"The quick brown fox jumps over the lazy dog";
+	let out: U256 = sha256(input);
+}
 ```
 
-All functions and types are documented inline for clarity and simplicity.
+---
+
+## 🔒 Security Notice
+
+Cryptal is **not yet audited** and should be considered **experimental**.
+
+- Do **not** use in production environments.
+- APIs and implementations may change without notice.
+- Side-channel resistance is **not guaranteed** at this stage.
+
+The crate is designed primarily for research, learning, and internal use within the Nebula ecosystem.
+
+---
+
+## 🦀 Rust Version
+
+- **Developed with**: Rust 1.92.0
+- **MSRV**: Rust 1.92.0 (may increase in the future)
 
 ---
 
@@ -55,27 +79,13 @@ All functions and types are documented inline for clarity and simplicity.
 
 Contributions are welcome — especially regarding:
 
-- routing performance & correctness  
-- async networking design  
-- serialization formats  
-- SDK ergonomics  
-- testing infrastructure  
-
-Standard workflow:
-
-```bash
-cargo fmt
-cargo clippy
-cargo test --workspace
-```
-
 Check [`CONTRIBUTING.md`](CONTRIBUTING.md) for details.
 
 ---
 
 ## 📄 License Philosophy
 
-Cryptography is licensed under the **Server Side Public License (SSPL) v1**.
+Cryptal is licensed under the **Server Side Public License (SSPL) v1**.
 
 This license is intentionally chosen to protect the integrity of the Nebula ecosystem.  
 While the project is fully open for **contribution, improvement, and transparency**,  
@@ -90,19 +100,14 @@ By using SSPL, we ensure that:
 - companies cannot exploit the project without contributing back,  
 - contributors retain full access to the entire codebase.
 
-In short, SSPL ensures that Cryptography — and the Nebula ecosystem built on top of it —  
+
+In short, SSPL ensures that Cryptal — and the Nebula ecosystem built on top of it —  
 remains **open to the community, but protected from fragmentation and exploitation**.
 
----
+## 🤝 Contact
 
-## 🧭 Vision
+For questions, discussions, or contributions, feel free to reach out:
 
-`Cryptography` aims to become a **compact, modern, and secure cryptographic toolbox** for Nebula and its derivatives.  
-Focus is on:
-
-- **clarity**  
-- **performance**  
-- **auditability**  
-- **minimal dependencies**
-
-A clean foundation for everything Nebula will need in the future.
+- **Discussions**: [Join the discussion](https://github.com/enzoblain/nebula/discussions)
+- **Discord**: enzoblain
+- **Email**: [enzoblain@proton.me](mailto:enzoblain@proton.me)
