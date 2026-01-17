@@ -1,38 +1,28 @@
-# Rust
 target/
-**/target/
+._target
 Cargo.lock
 
-# IDEs
-.idea/
-.vscode/
-*.iml
+/.idea/
 *.iws
+*.iml
 *.ipr
+/out/
 
-# Editors
+.vscode/
+
 *~
 *.swp
 *.swo
 
-# OS
 .DS_Store
-.DS_Store?
-.AppleDouble
-.LSOverride
+
 Thumbs.db
-Desktop.ini
 ehthumbs.db
 
-# Debug
+*.log
+/log/
+/logs/
+/tmp/
+
 *.pdb
 *.stackdump
-
-# Env
-.env
-.env.*
-
-# Coverage
-/coverage/
-/lcov.info
-/tarpaulin-report.html

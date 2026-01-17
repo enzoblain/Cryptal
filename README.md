@@ -19,7 +19,7 @@
 
 - [ ] **Key Management**
   - [ ] Argon2id (password → key)
-  - [ ] CSPRNG (secure randomness)
+  - [x] CSPRNG (secure randomness)
 
 - [ ] **Public-Key Cryptography**
   - [ ] Ed25519 (signatures, identity)
