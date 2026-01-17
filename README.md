@@ -68,6 +68,18 @@ The crate is designed primarily for research, learning, and internal use within 
 
 ---
 
+---
+
+## 📖 Documentation
+
+You can generate the full API documentation locally using Cargo:
+
+```
+cargo doc --open
+```
+
+This will build and open the documentation for Cadentis and all its public APIs in your browser.
+
 ## 🦀 Rust Version
 
 - **Developed with**: Rust 1.92.0

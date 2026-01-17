@@ -1,7 +1,25 @@
-use crate::primitives::u256::U256;
+//! Arithmetic and bitwise operations for `U256`
+//!
+//! This module implements a minimal set of arithmetic and bitwise operator
+//! traits for the `U256` type.
+//!
+//! The goal is **not** to provide a full big-integer library, but to supply
+//! only the operations that are required by the Nebula ecosystem, such as:
+//! - distance computations (XOR, AND, shifts)
+//! - comparisons and ordering
+//! - basic arithmetic for identifiers and protocol logic
+//!
+//! All operations are implemented explicitly on fixed-size arrays, with:
+//! - no heap allocation
+//! - predictable behavior
+//! - wrapping semantics where appropriate
+//!
+//! The internal representation is big-endian.
 
+use crate::primitives::u256::U256;
 use std::ops::{Add, BitAnd, BitXor, Div, Mul, Shl, Shr, Sub};
 
+/// Bitwise XOR between two 256-bit values.
 impl BitXor<U256> for U256 {
     type Output = U256;
 
@@ -16,6 +34,7 @@ impl BitXor<U256> for U256 {
     }
 }
 
+/// Bitwise AND between two 256-bit values.
 impl BitAnd<U256> for U256 {
     type Output = U256;
 
@@ -29,6 +48,11 @@ impl BitAnd<U256> for U256 {
         U256(out)
     }
 }
+
+/// Logical left shift (`<<`) by a 256-bit value.
+///
+/// Only the lowest 16 bits of the shift value are considered.
+/// Shifts greater than or equal to 256 bits yield zero.
 impl Shl<U256> for U256 {
     type Output = U256;
 
@@ -57,7 +81,6 @@ impl Shl<U256> for U256 {
 
         for i in 0..32 {
             let val = tmp[i];
-
             out[i] = (val << bit_shift) | carry;
             carry = val >> (8 - bit_shift);
         }
@@ -66,6 +89,10 @@ impl Shl<U256> for U256 {
     }
 }
 
+/// Logical right shift (`>>`) by a 256-bit value.
+///
+/// Only the lowest 16 bits of the shift value are considered.
+/// Shifts greater than or equal to 256 bits yield zero.
 impl Shr<U256> for U256 {
     type Output = U256;
 
@@ -94,7 +121,6 @@ impl Shr<U256> for U256 {
 
         for i in (0..32).rev() {
             let val = tmp[i];
-
             out[i] = (val >> bit_shift) | carry;
             carry = val << (8 - bit_shift);
         }
@@ -103,6 +129,7 @@ impl Shr<U256> for U256 {
     }
 }
 
+/// Addition modulo 2²⁵⁶.
 impl Add for U256 {
     type Output = U256;
 
@@ -120,6 +147,7 @@ impl Add for U256 {
     }
 }
 
+/// Subtraction modulo 2²⁵⁶.
 impl Sub for U256 {
     type Output = U256;
 
@@ -144,6 +172,9 @@ impl Sub for U256 {
     }
 }
 
+/// Multiplication modulo 2²⁵⁶.
+///
+/// The result is truncated to 256 bits.
 impl Mul<U256> for U256 {
     type Output = U256;
 
@@ -179,11 +210,15 @@ impl Mul<U256> for U256 {
     }
 }
 
+/// Integer division (`/`) producing the quotient.
+///
+/// This implements a classic shift-and-subtract division algorithm.
 impl Div<U256> for U256 {
     type Output = U256;
 
     fn div(self, rhs: U256) -> Self::Output {
         assert!(rhs != U256::ZERO, "division by zero");
+
         if self < rhs {
             return U256::ZERO;
         }
