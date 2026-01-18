@@ -4,19 +4,23 @@
 //! ChaCha20 block function as specified in RFC 8439.
 //!
 //! It is designed to be used as a cryptographic primitive inside the Nebula
-//! ecosystem (Kadnet, secure channels, AEAD constructions), and therefore:
+//! ecosystem (e.g. Kadnet, secure channels, AEAD constructions), and therefore:
 //! - avoids heap allocations
 //! - runs in constant time
 //! - exposes only minimal, explicit APIs
 //!
-//! This code **does not** implement authenticated encryption by itself.
-//! It only generates a 64-byte keystream block. Higher-level constructions
-//! (e.g. ChaCha20-Poly1305) must be built on top of it.
+//! This module **does not** implement authenticated encryption by itself.
+//! It only generates a single 64-byte ChaCha20 keystream block.
+//! Higher-level constructions (such as ChaCha20-Poly1305) must be built
+//! on top of this primitive with strict nonce and key management.
+
+use crate::primitives::U256;
 
 /// ChaCha20 constant words.
 ///
 /// These values correspond to the ASCII string:
-/// `"expand 32-byte k"` encoded as little-endian `u32`.
+/// `"expand 32-byte k"` encoded as little-endian `u32` words, as defined
+/// in RFC 8439.
 ///
 /// They are public, fixed, and non-secret, and define the ChaCha20
 /// permutation domain.
@@ -30,8 +34,8 @@ const CHACHA20_CONSTANTS: [u32; 4] = [
 /// Performs one ChaCha20 quarter round.
 ///
 /// A quarter round mixes four 32-bit words of the internal state using
-/// addition modulo 2³², XOR, and left rotations. This operation is the
-/// fundamental source of diffusion and non-linearity in ChaCha20.
+/// addition modulo 2³², XOR, and fixed left rotations. This operation is
+/// the fundamental source of diffusion and non-linearity in ChaCha20.
 ///
 /// The function is branchless and runs in constant time.
 #[inline(always)]
@@ -80,28 +84,30 @@ fn chacha20_rounds(state: &mut [u32; 16]) {
 /// Generates a single 64-byte ChaCha20 keystream block.
 ///
 /// # Parameters
-/// - `key`: 256-bit secret key
+/// - `key`: 256-bit secret key, provided as a `U256` value
 /// - `counter`: 32-bit block counter
 /// - `nonce`: 96-bit nonce (IETF variant)
 ///
 /// # Returns
 /// A 64-byte keystream block that can be XORed with plaintext or ciphertext.
 ///
-/// # Notes
+/// # Security Notes
 /// - This function does **not** perform encryption or authentication.
-/// - Reusing the same `(key, nonce, counter)` combination is catastrophic
-///   for security and must be avoided at higher layers.
-pub(crate) fn chacha20_block(key: &[u8; 32], counter: u32, nonce: &[u8; 12]) -> [u8; 64] {
+/// - Reusing the same `(key, nonce, counter)` tuple is catastrophic for
+///   security and must be prevented by higher-level protocols.
+/// - The `U256` key is interpreted as raw key material and is serialized
+///   internally as little-endian words, as required by ChaCha20.
+pub(crate) fn chacha20_block(key: &U256, counter: u32, nonce: &[u8; 12]) -> [u8; 64] {
     // Initialize the ChaCha20 state
     let mut state = [0u32; 16];
 
     // Constants
     state[0..4].copy_from_slice(&CHACHA20_CONSTANTS);
 
-    // Key (256-bit, little-endian)
+    // Key (256-bit, interpreted as little-endian words)
     state[4..12]
         .iter_mut()
-        .zip(key.chunks_exact(4))
+        .zip(key.0.chunks_exact(4))
         .for_each(|(s, k)| {
             *s = u32::from_le_bytes(k.try_into().unwrap());
         });
