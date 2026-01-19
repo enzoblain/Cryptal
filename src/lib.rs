@@ -10,10 +10,11 @@
 //!
 //! # Module overview
 //!
-//! - `os`  
-//!   Operating system integration for cryptography-related functionality.
-//!   This module provides access to system entropy sources and other
-//!   OS-backed primitives required to bootstrap secure randomness.
+//! - `utils`  
+//!   Low-level, non-cryptographic utilities used by the rest of the crate.
+//!   This module contains environment-facing helpers, byte-level utilities,
+//!   and other foundational components required to support cryptographic
+//!   code without polluting its APIs.
 //!
 //! - `hash`  
 //!   Cryptographic hash functions and related utilities (e.g. SHA-256,
@@ -27,22 +28,22 @@
 //!
 //! - `rng`  
 //!   Cryptographically secure pseudorandom number generators built from
-//!   internal primitives (e.g. ChaCha20-based CSPRNG). These generators
-//!   rely on the `os` module for initial entropy and provide deterministic,
-//!   auditable randomness expansion.
+//!   internal primitives. These generators may rely on the `utils` module
+//!   for initial entropy or environment interaction, while providing
+//!   deterministic and auditable randomness expansion.
 //!
 //! # Design goals
 //!
 //! - No heap allocations in core primitives
 //! - Minimal and explicit APIs
 //! - Stable, well-defined semantics
-//! - Clear separation between primitives and higher-level constructions
+//! - Clear separation between cryptographic code and supporting utilities
 //!
 //! This crate is not intended to replace full-featured, externally audited
 //! cryptographic libraries, but to serve as a small, controlled foundation
 //! for Nebula's internal cryptographic needs.
 
-mod os;
+mod utils;
 
 pub mod hash;
 pub mod primitives;

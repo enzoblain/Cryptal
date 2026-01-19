@@ -14,9 +14,9 @@
 //! to replace a full-featured, externally audited RNG library, but to
 //! serve as a predictable and auditable internal primitive.
 
-use crate::os::sys_random;
 use crate::primitives::U256;
 use crate::rng::chacha20drbg::chacha20_block;
+use crate::utils::os::sys_random;
 
 /// Cryptographically secure pseudorandom number generator.
 ///
