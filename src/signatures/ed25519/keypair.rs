@@ -1,6 +1,5 @@
-use cryptal::hash::sha512;
-
-use crate::ge::{GeP3, ge_p3_tobytes, ge_scalarmult_base};
+use super::ge::{GeP3, ge_p3_tobytes, ge_scalarmult_base};
+use crate::hash::sha512;
 
 pub fn ed25519_create_keypair(
     public_key: &mut [u8; 32],

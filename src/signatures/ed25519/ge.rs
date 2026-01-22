@@ -1,4 +1,4 @@
-use crate::{
+use super::{
     fe::{
         FE, fe_0, fe_1, fe_add, fe_cmov, fe_copy, fe_frombytes, fe_invert, fe_isnegative,
         fe_isnonzero, fe_mul, fe_neg, fe_pow22523, fe_sq, fe_sq2, fe_sub, fe_tobytes,
@@ -448,10 +448,10 @@ pub fn ge_scalarmult_base(h: &mut GeP3, a: &[u8; 32]) {
     }
 
     let mut carry: i8 = 0;
-    for i in 0..63 {
-        e[i] += carry;
-        carry = (e[i] + 8) >> 4;
-        e[i] -= carry << 4;
+    for v in e.iter_mut().take(63) {
+        *v += carry;
+        carry = (*v + 8) >> 4;
+        *v -= carry << 4;
     }
     e[63] += carry;
 

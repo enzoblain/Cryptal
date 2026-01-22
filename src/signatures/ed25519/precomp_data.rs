@@ -1,4 +1,4 @@
-use crate::ge::GePrecomp;
+use super::ge::GePrecomp;
 
 pub const BI: [GePrecomp; 8] = [
     GePrecomp {

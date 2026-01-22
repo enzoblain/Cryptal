@@ -1,4 +1,4 @@
-use crate::fe::{
+use super::fe::{
     FE, fe_0, fe_1, fe_add, fe_copy, fe_cswap, fe_frombytes, fe_invert, fe_mul, fe_mul121666,
     fe_sq, fe_sub, fe_tobytes,
 };

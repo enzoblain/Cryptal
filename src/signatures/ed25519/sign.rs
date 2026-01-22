@@ -1,6 +1,6 @@
-use cryptal::hash::sha512;
+use crate::hash::sha512;
 
-use crate::{
+use super::{
     ge::{GeP3, ge_p3_tobytes, ge_scalarmult_base},
     sc::{sc_muladd, sc_reduce},
 };
