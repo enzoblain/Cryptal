@@ -24,14 +24,6 @@ use std::fmt::{Display, Formatter, Result};
 pub struct U256(pub(crate) [u8; 32]);
 
 impl U256 {
-        /// Crée un U256 à partir d'un tableau d'octets little-endian (le moins significatif d'abord).
-        pub fn from_le_bytes(bytes: [u8; 32]) -> Self {
-            let mut be = [0u8; 32];
-            for i in 0..32 {
-                be[i] = bytes[31 - i];
-            }
-            U256(be)
-        }
     /// The value zero.
     pub const ZERO: Self = Self([0u8; 32]);
 
