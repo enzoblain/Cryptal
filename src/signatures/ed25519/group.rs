@@ -1,6 +1,6 @@
 use super::field::FieldElement;
 use super::precomp_data::BI;
-use crate::signatures::ed25519::consttime::{equal, negative};
+use crate::signatures::ed25519::consttime::{equal_i8, negative};
 use crate::signatures::ed25519::field::{D, D2, SQRTM1};
 use crate::signatures::ed25519::precomp_data::BASE;
 use crate::signatures::ed25519::scalar::Scalar;
@@ -404,14 +404,14 @@ impl GePrecomp {
         let bnegative = negative(b);
         let babs = (b as i16 - (((-(bnegative as i16)) & (b as i16)) << 1)) as i8;
 
-        t.conditional_move(&BASE[pos][0], equal(babs, 1));
-        t.conditional_move(&BASE[pos][1], equal(babs, 2));
-        t.conditional_move(&BASE[pos][2], equal(babs, 3));
-        t.conditional_move(&BASE[pos][3], equal(babs, 4));
-        t.conditional_move(&BASE[pos][4], equal(babs, 5));
-        t.conditional_move(&BASE[pos][5], equal(babs, 6));
-        t.conditional_move(&BASE[pos][6], equal(babs, 7));
-        t.conditional_move(&BASE[pos][7], equal(babs, 8));
+        t.conditional_move(&BASE[pos][0], equal_i8(babs, 1));
+        t.conditional_move(&BASE[pos][1], equal_i8(babs, 2));
+        t.conditional_move(&BASE[pos][2], equal_i8(babs, 3));
+        t.conditional_move(&BASE[pos][3], equal_i8(babs, 4));
+        t.conditional_move(&BASE[pos][4], equal_i8(babs, 5));
+        t.conditional_move(&BASE[pos][5], equal_i8(babs, 6));
+        t.conditional_move(&BASE[pos][6], equal_i8(babs, 7));
+        t.conditional_move(&BASE[pos][7], equal_i8(babs, 8));
 
         minust.yplusx = t.yminusx;
         minust.yminusx = t.yplusx;

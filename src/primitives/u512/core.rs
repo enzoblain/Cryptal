@@ -67,6 +67,12 @@ impl U512 {
 
         count
     }
+
+    /// Returns the raw big-endian byte representation.
+    #[inline]
+    pub fn to_bytes(&self) -> [u8; 64] {
+        self.0
+    }
 }
 
 impl Display for U512 {

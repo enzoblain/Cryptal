@@ -13,4 +13,6 @@
 //! signature schemes. Instead, each algorithm is implemented according
 //! to its specification, with minimal indirection.
 
-pub mod ed25519;
+mod ed25519;
+
+pub use ed25519::core as Ed25519;

@@ -1,10 +1,6 @@
-pub mod add_scalar;
-pub mod consttime;
-pub mod field;
-pub mod group;
-pub mod key_exchange;
-pub mod keypair;
-pub mod precomp_data;
-pub mod scalar;
-pub mod sign;
-pub mod verify;
+pub(crate) mod consttime;
+pub mod core;
+pub(crate) mod field;
+pub(crate) mod group;
+pub(crate) mod precomp_data;
+pub(crate) mod scalar;

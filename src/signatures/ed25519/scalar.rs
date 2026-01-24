@@ -1,9 +1,18 @@
 use crate::signatures::ed25519::field::{load_3, load_4};
 
 #[derive(Clone, Copy)]
-pub(crate) struct Scalar(pub(crate) [u8; 32]);
+pub struct Scalar(pub [u8; 32]);
 
 impl Scalar {
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        let arr = bytes.try_into().expect("slice must be 32 bytes");
+        Scalar(arr)
+    }
+
+    pub fn to_bytes(self) -> [u8; 32] {
+        self.0
+    }
+
     pub(crate) fn reduce(wide: [u8; 64]) -> Self {
         let mut s0 = 2097151 & load_3(&wide[0..]) as i64;
         let mut s1 = 2097151 & (load_4(&wide[2..]) >> 5) as i64;
