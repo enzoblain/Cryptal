@@ -44,6 +44,31 @@
 //!   No signing, verification, or protocol logic lives here—only key
 //!   structure and manipulation.
 //!
+//! - `recovery`  
+//!   Cryptographic recovery and survivability mechanisms.
+//!
+//!   This module contains primitives designed to protect, distribute, and
+//!   recover sensitive material in the presence of partial data loss or
+//!   compromise. It currently provides an implementation of
+//!   **Shamir Secret Sharing (SSS)**, allowing a secret to be split into
+//!   multiple shares such that only a configurable threshold of shares is
+//!   required for reconstruction.
+//!
+//!   The Shamir implementation operates entirely over finite fields
+//!   (GF(256)), supports threshold-based reconstruction, and includes
+//!   share refresh functionality that renews shares without ever
+//!   reconstructing the underlying secret.
+//!
+//!   This module is intended for use cases such as:
+//!   - distributed key backup and recovery
+//!   - multi-party custody of cryptographic secrets
+//!   - long-term survivability of sensitive material
+//!   - protection against gradual share compromise
+//!
+//!   The recovery module is purely cryptographic: it does not perform any
+//!   storage, networking, or policy decisions. Those concerns are handled
+//!   at higher layers of the Nebula stack.
+//!
 //! # Design goals
 //!
 //! - No heap allocations in core primitives
@@ -60,4 +85,5 @@ mod utils;
 pub mod hash;
 pub mod keys;
 pub mod primitives;
+pub mod recovery;
 pub mod rng;
