@@ -14,8 +14,6 @@
 //! Higher-level constructions (such as ChaCha20-Poly1305) must be built
 //! on top of this primitive with strict nonce and key management.
 
-use crate::primitives::U256;
-
 /// ChaCha20 constant words.
 ///
 /// These values correspond to the ASCII string:
@@ -65,7 +63,7 @@ fn quarter_round(state: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize) 
 ///
 /// This results in a total of 20 rounds, which is the standard and
 /// conservative security setting for ChaCha20.
-fn chacha20_rounds(state: &mut [u32; 16]) {
+pub fn rounds(state: &mut [u32; 16]) {
     for _ in 0..10 {
         // Column rounds
         quarter_round(state, 0, 4, 8, 12);
@@ -84,7 +82,7 @@ fn chacha20_rounds(state: &mut [u32; 16]) {
 /// Generates a single 64-byte ChaCha20 keystream block.
 ///
 /// # Parameters
-/// - `key`: 256-bit secret key, provided as a `U256` value
+/// - `key`: 256-bit secret key (32 bytes)
 /// - `counter`: 32-bit block counter
 /// - `nonce`: 96-bit nonce (IETF variant)
 ///
@@ -95,19 +93,17 @@ fn chacha20_rounds(state: &mut [u32; 16]) {
 /// - This function does **not** perform encryption or authentication.
 /// - Reusing the same `(key, nonce, counter)` tuple is catastrophic for
 ///   security and must be prevented by higher-level protocols.
-/// - The `U256` key is interpreted as raw key material and is serialized
-///   internally as little-endian words, as required by ChaCha20.
-pub(crate) fn chacha20_block(key: &U256, counter: u32, nonce: &[u8; 12]) -> [u8; 64] {
+pub(crate) fn block(key: &[u8; 32], counter: u32, nonce: &[u8; 12]) -> [u8; 64] {
     // Initialize the ChaCha20 state
     let mut state = [0u32; 16];
 
     // Constants
     state[0..4].copy_from_slice(&CHACHA20_CONSTANTS);
 
-    // Key (256-bit, interpreted as little-endian words)
+    // Key (256-bit, as little-endian words)
     state[4..12]
         .iter_mut()
-        .zip(key.0.chunks_exact(4))
+        .zip(key.chunks_exact(4))
         .for_each(|(s, k)| {
             *s = u32::from_le_bytes(k.try_into().unwrap());
         });
@@ -127,7 +123,7 @@ pub(crate) fn chacha20_block(key: &U256, counter: u32, nonce: &[u8; 12]) -> [u8;
     let original = state;
 
     // Apply ChaCha20 permutation
-    chacha20_rounds(&mut state);
+    rounds(&mut state);
 
     // Add original state (feed-forward)
     state.iter_mut().zip(&original).for_each(|(s, o)| {
@@ -143,4 +139,43 @@ pub(crate) fn chacha20_block(key: &U256, counter: u32, nonce: &[u8; 12]) -> [u8;
         });
 
     out
+}
+
+/// XORs input data with the ChaCha20 keystream.
+///
+/// This function implements the ChaCha20 stream cipher by generating
+/// successive 64-byte keystream blocks and XORing them with the input.
+///
+/// # Parameters
+/// - `key`: 256-bit secret key (32 bytes)
+/// - `nonce`: 96-bit nonce (IETF variant)
+/// - `counter`: Initial 32-bit block counter
+/// - `input`: Plaintext or ciphertext input
+/// - `output`: Output buffer (must be the same length as `input`)
+///
+/// # Notes
+/// - Encryption and decryption are identical operations.
+/// - This function performs no authentication.
+/// - The caller must ensure `(key, nonce)` uniqueness.
+pub(crate) fn xor(key: &[u8; 32], nonce: &[u8; 12], counter: u32, input: &[u8], output: &mut [u8]) {
+    assert_eq!(input.len(), output.len());
+
+    let mut block_counter = counter;
+    let mut offset = 0usize;
+
+    while offset < input.len() {
+        // Generate keystream block
+        let keystream = block(key, block_counter, nonce);
+        block_counter = block_counter.wrapping_add(1);
+
+        // XOR keystream with input
+        let remaining = input.len() - offset;
+        let take = remaining.min(64);
+
+        for i in 0..take {
+            output[offset + i] = input[offset + i] ^ keystream[i];
+        }
+
+        offset += take;
+    }
 }

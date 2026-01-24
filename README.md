@@ -20,8 +20,8 @@
   - [x] Ed25519 (signatures, identity)
   - [x] X25519 (key exchange)
 
-- [ ] **Encryption**
-  - [ ] ChaCha20-Poly1305 (confidentiality, integrity)
+- [x] **Encryption**
+  - [x] ChaCha20-Poly1305 (confidentiality, integrity)
 
 - [ ] **Key Management**
   - [ ] Argon2id (password → key)

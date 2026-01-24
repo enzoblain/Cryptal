@@ -13,7 +13,7 @@
 /// - Forward secrecy through periodic rekeying
 /// - No heap allocation
 /// - Minimal and explicit API surface
-mod chacha20drbg;
+pub(crate) mod chacha20;
 mod csprng;
 
 /// Cryptographically secure pseudorandom number generator.

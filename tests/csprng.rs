@@ -1,9 +1,8 @@
-use cryptal::primitives::U256;
 use cryptal::rng::Csprng;
 
 #[test]
 fn test_csprng_deterministic_from_seed() {
-    let seed = U256::from([0x42u8; 32]);
+    let seed = [0x42u8; 32];
 
     let mut rng1 = Csprng::from_seed(seed);
     let mut rng2 = Csprng::from_seed(seed);
@@ -19,7 +18,7 @@ fn test_csprng_deterministic_from_seed() {
 
 #[test]
 fn test_csprng_rekey_changes_output() {
-    let seed = U256::from([0xAAu8; 32]);
+    let seed = [0xAAu8; 32];
     let mut rng = Csprng::from_seed(seed);
 
     let mut a = [0u8; 64];
@@ -33,7 +32,7 @@ fn test_csprng_rekey_changes_output() {
 
 #[test]
 fn test_csprng_not_all_zero() {
-    let seed = U256::from([0u8; 32]);
+    let seed = [0u8; 32];
     let mut rng = Csprng::from_seed(seed);
 
     let mut out = [0u8; 64];

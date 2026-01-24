@@ -82,6 +82,7 @@
 
 mod utils;
 
+pub mod encryption;
 pub mod hash;
 pub mod keys;
 pub mod primitives;

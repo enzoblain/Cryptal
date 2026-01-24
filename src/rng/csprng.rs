@@ -14,8 +14,7 @@
 //! to replace a full-featured, externally audited RNG library, but to
 //! serve as a predictable and auditable internal primitive.
 
-use crate::primitives::U256;
-use crate::rng::chacha20drbg::chacha20_block;
+use crate::rng::chacha20::block;
 use crate::utils::os::sys_random;
 
 /// Cryptographically secure pseudorandom number generator.
@@ -36,7 +35,7 @@ pub struct Csprng {
     ///
     /// The key is treated as opaque key material and is not interpreted
     /// as an arithmetic value.
-    key: U256,
+    key: [u8; 32],
 
     /// Nonce value (96-bit, fixed to zero for DRBG usage)
     ///
@@ -67,7 +66,7 @@ impl Csprng {
         let mut seed = [0u8; 32];
         sys_random(&mut seed);
 
-        Self::from_seed(seed.into())
+        Self::from_seed(seed)
     }
 
     /// Creates a new CSPRNG from a user-provided seed.
@@ -75,9 +74,9 @@ impl Csprng {
     /// The seed **must** be uniformly random and unpredictable. After being
     /// consumed, the seed buffer is wiped to avoid lingering sensitive data
     /// in memory.
-    pub fn from_seed(mut seed: U256) -> Self {
+    pub fn from_seed(mut seed: [u8; 32]) -> Self {
         let key = seed;
-        seed.0.fill(0);
+        seed.fill(0);
 
         Self {
             key,
@@ -95,7 +94,7 @@ impl Csprng {
         let mut offset = 0;
 
         while offset < out.len() {
-            let block = chacha20_block(&self.key, self.counter, &self.nonce);
+            let block = block(&self.key, self.counter, &self.nonce);
 
             self.counter = self.counter.wrapping_add(1);
 
@@ -114,10 +113,10 @@ impl Csprng {
     /// as the new internal key. This ensures that previously generated output
     /// cannot be recovered even if the current internal state is compromised.
     fn rekey(&mut self) {
-        let block = chacha20_block(&self.key, self.counter, &self.nonce);
+        let block = block(&self.key, self.counter, &self.nonce);
 
         self.counter = self.counter.wrapping_add(1);
-        self.key.0.copy_from_slice(&block[..32]);
+        self.key.copy_from_slice(&block[..32]);
     }
 }
 
