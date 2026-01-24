@@ -1,3 +1,51 @@
+//! Finite field arithmetic for Ed25519 / Curve25519.
+//!
+//! This module implements arithmetic in the prime field
+//!
+//! ```text
+//! 𝔽ₚ where p = 2²⁵⁵ − 19
+//! ```
+//!
+//! used by the Ed25519 and Curve25519 elliptic curves.
+//!
+//! ## Representation
+//!
+//! Field elements are represented using a 10-limb signed integer format,
+//! with alternating limb sizes:
+//!
+//! ```text
+//! [26, 25, 26, 25, 26, 25, 26, 25, 26, 25] bits
+//! ```
+//!
+//! This radix-(2²⁵·⁵) representation matches the original Ed25519 reference
+//! implementation and allows efficient carry propagation and reduction.
+//!
+//! ## Design goals
+//!
+//! - **Constant-time execution**: no secret-dependent branches or memory access.
+//! - **Overflow safety**: all intermediate arithmetic is promoted to `i64`.
+//! - **Auditability**: code structure closely follows the Ed25519 reference.
+//! - **Deferred reduction**: additions and subtractions may return partially
+//!   reduced values, normalized later when required.
+//!
+//! ## Implemented operations
+//!
+//! - Field addition, subtraction, negation
+//! - Field multiplication and squaring
+//! - Repeated squaring
+//! - Modular inversion
+//! - Exponentiation chains used by Ed25519
+//! - Canonical encoding and decoding
+//!
+//! ## Notes
+//!
+//! This module is intentionally low-level and explicit.
+//! It does not attempt to hide arithmetic details behind abstractions,
+//! prioritizing correctness, predictability, and side-channel resistance.
+//!
+//! The implementation is compatible with the Ed25519 reference behavior
+//! and suitable for cryptographic use.
+
 use std::array;
 use std::ops::{Add, Mul, Neg, Sub};
 

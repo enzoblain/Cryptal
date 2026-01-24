@@ -24,7 +24,7 @@
   - [x] CSPRNG (secure randomness)
 
 - [ ] **Public-Key Cryptography**
-  - [ ] Ed25519 (signatures, identity)
+  - [x] Ed25519 (signatures, identity)
   - [ ] X25519 (key exchange)
 
 - [ ] **Secret Management**

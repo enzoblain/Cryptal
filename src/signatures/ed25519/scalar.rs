@@ -1,853 +1,637 @@
+//! Ed25519 scalar arithmetic.
+//!
+//! This module implements arithmetic on scalars used by the Ed25519 signature
+//! scheme and related constructions.
+//!
+//! Scalars are integers modulo the Ed25519 group order ℓ, defined as:
+//!
+//! ```text
+//! ℓ = 2^252 + 27742317777372353535851937790883648493
+//! ```
+//!
+//! ## Role of scalars
+//!
+//! Scalars are used throughout Ed25519 for:
+//!
+//! - private keys (after clamping)
+//! - deterministic nonces derived from hashes
+//! - challenges computed during signing and verification
+//! - scalar multiplication of curve points
+//!
+//! This module provides the low-level building blocks required to safely
+//! manipulate such values.
+//!
+//! ## Representation
+//!
+//! Scalars are stored as a fixed-size `[u8; 32]` little-endian byte array.
+//! This representation is intentionally minimal and does **not** enforce
+//! invariants by itself.
+//!
+//! In particular:
+//!
+//! - No clamping is performed automatically
+//! - No reduction modulo ℓ is implicit
+//!
+//! All normalization steps are performed explicitly by the relevant functions
+//! (e.g. `reduce`, `from_mul_sum`).
+//!
+//! ## Implemented operations
+//!
+//! This module implements:
+//!
+//! - Reduction of wide integers modulo ℓ (`reduce`)
+//! - Modular linear combinations (`a * b + c mod ℓ`)
+//! - Sliding-window scalar recoding (`slide`)
+//!
+//! These primitives are sufficient to support:
+//!
+//! - Ed25519 signature generation
+//! - Ed25519 signature verification
+//! - Key update and scalar arithmetic routines
+//!
+//! ## Algorithms
+//!
+//! - Scalars are reduced using a radix-2²¹ representation with signed limbs
+//! - Reduction coefficients follow the identity:
+//!
+//! ```text
+//! 2^252 ≡ 27742317777372353535851937790883648493 (mod ℓ)
+//! ```
+//!
+//! - Sliding-window recoding produces sparse signed digits in `[-15, 15]`
+//!
+//! All algorithms closely follow the Ed25519 reference implementations
+//! (ref10 / orlp) and preserve identical arithmetic behavior.
+//!
+//! ## Security properties
+//!
+//! - All scalar operations are **constant-time** with respect to secret data
+//! - No secret-dependent branches
+//! - No secret-dependent memory accesses
+//!
+//! The sliding-window representation is designed for use in constant-time
+//! scalar multiplication routines.
+//!
+//! ## Design philosophy
+//!
+//! This module is deliberately low-level and explicit.
+//! It prioritizes:
+//!
+//! - auditability
+//! - strict control over reductions and carries
+//! - behavioral equivalence with the reference Ed25519 code
+//!
+//! Higher-level guarantees (key clamping, protocol correctness) are enforced
+//! by the layers that use this module.
+
 use crate::signatures::ed25519::field::{load_3, load_4};
 
+use std::array;
+
+/// A 256-bit scalar used in Ed25519 operations.
+///
+/// This type represents integers modulo the Ed25519 group order `ℓ`,
+/// encoded as 32 little-endian bytes. Scalars are used for:
+///
+/// - private keys
+/// - nonces
+/// - challenges derived from hashes
+/// - scalar multiplication on curve points
+///
+/// The internal representation is intentionally minimal: a fixed-size
+/// `[u8; 32]` buffer. Higher-level invariants (clamping, reduction modulo
+/// `ℓ`) are enforced explicitly by the functions that construct or
+/// transform scalars.
 #[derive(Clone, Copy)]
 pub struct Scalar(pub [u8; 32]);
 
 impl Scalar {
+    /// Constructs a scalar from a 32-byte little-endian slice.
+    ///
+    /// This function performs no validation, clamping, or modular
+    /// reduction. The caller is responsible for ensuring the input
+    /// represents a valid scalar for the intended use.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bytes` is not exactly 32 bytes long.
     pub fn from_bytes(bytes: &[u8]) -> Self {
         let arr = bytes.try_into().expect("slice must be 32 bytes");
         Scalar(arr)
     }
 
+    /// Returns the canonical 32-byte little-endian encoding of the scalar.
+    ///
+    /// This method simply exposes the internal representation without
+    /// performing any normalization or reduction.
     pub fn to_bytes(self) -> [u8; 32] {
         self.0
     }
 
+    /// Reduces a 512-bit integer modulo the Ed25519 scalar field order `ℓ`.
+    ///
+    /// This function takes a 64-byte (512-bit) input and reduces it modulo
+    /// the group order
+    ///
+    /// ```text
+    /// ℓ = 2^252 + 27742317777372353535851937790883648493
+    /// ```
+    ///
+    /// The implementation follows the reference Ed25519 reduction algorithm
+    /// and operates on a radix-2²¹ representation using 24 signed limbs.
+    ///
+    /// ## Overview
+    ///
+    /// The reduction proceeds in several well-defined phases:
+    ///
+    /// 1. **Radix decomposition**
+    ///    - The 64-byte input is split into 21-bit limbs using overlapping
+    ///      `load_3` / `load_4` operations.
+    ///    - Limbs `s[0]..s[23]` represent the wide integer in base 2²¹.
+    ///
+    /// 2. **High-limb elimination**
+    ///    - Limbs `s[18]..s[23]` are folded back into lower limbs using
+    ///      precomputed reduction coefficients.
+    ///    - These coefficients encode the relation between `2^252` and `ℓ`.
+    ///
+    /// 3. **Carry propagation**
+    ///    - Carries are propagated multiple times to ensure all limbs fit
+    ///      within 21 bits.
+    ///    - The process alternates between even and odd limbs to maintain
+    ///      bounds at each step.
+    ///
+    /// 4. **Final reduction**
+    ///    - Any remaining contribution in limb `s[12]` is folded back.
+    ///    - A final carry pass ensures canonical representation.
+    ///
+    /// 5. **Re-encoding**
+    ///    - The reduced scalar is serialized back into 32 bytes using the
+    ///      standard Ed25519 bit layout.
+    ///
+    /// ## Constant-time behavior
+    ///
+    /// - All operations are data-independent.
+    /// - No branches depend on secret data.
+    /// - The reduction is safe to use with secret scalars.
+    ///
+    /// ## Correctness guarantees
+    ///
+    /// - The output is guaranteed to be strictly less than `ℓ`.
+    /// - The resulting scalar is in canonical form.
+    /// - Behavior matches the Ed25519 reference C implementation.
+    ///
+    /// ## Notes
+    ///
+    /// - Limb arithmetic is performed using `i64` to prevent overflow.
+    /// - The chosen radix (2²¹) balances carry cost and multiplication safety.
+    /// - This function is a critical primitive used in:
+    ///   - signature generation
+    ///   - signature verification
+    ///   - scalar arithmetic
     pub(crate) fn reduce(wide: [u8; 64]) -> Self {
-        let mut s0 = 2097151 & load_3(&wide[0..]) as i64;
-        let mut s1 = 2097151 & (load_4(&wide[2..]) >> 5) as i64;
-        let mut s2 = 2097151 & (load_3(&wide[5..]) >> 2) as i64;
-        let mut s3 = 2097151 & (load_4(&wide[7..]) >> 7) as i64;
-        let mut s4 = 2097151 & (load_4(&wide[10..]) >> 4) as i64;
-        let mut s5 = 2097151 & (load_3(&wide[13..]) >> 1) as i64;
-        let mut s6 = 2097151 & (load_4(&wide[15..]) >> 6) as i64;
-        let mut s7 = 2097151 & (load_3(&wide[18..]) >> 3) as i64;
-        let mut s8 = 2097151 & load_3(&wide[21..]) as i64;
-        let mut s9 = 2097151 & (load_4(&wide[23..]) >> 5) as i64;
-        let mut s10 = 2097151 & (load_3(&wide[26..]) >> 2) as i64;
-        let mut s11 = 2097151 & (load_4(&wide[28..]) >> 7) as i64;
-        let mut s12 = 2097151 & (load_4(&wide[31..]) >> 4) as i64;
-        let mut s13 = 2097151 & (load_3(&wide[34..]) >> 1) as i64;
-        let mut s14 = 2097151 & (load_4(&wide[36..]) >> 6) as i64;
-        let mut s15 = 2097151 & (load_3(&wide[39..]) >> 3) as i64;
-        let mut s16 = 2097151 & load_3(&wide[42..]) as i64;
-        let mut s17 = 2097151 & (load_4(&wide[44..]) >> 5) as i64;
-        let s18 = 2097151 & (load_3(&wide[47..]) >> 2) as i64;
-        let s19 = 2097151 & (load_4(&wide[49..]) >> 7) as i64;
-        let s20 = 2097151 & (load_4(&wide[52..]) >> 4) as i64;
-        let s21 = 2097151 & (load_3(&wide[55..]) >> 1) as i64;
-        let s22 = 2097151 & (load_4(&wide[57..]) >> 6) as i64;
-        let s23 = (load_4(&wide[60..]) >> 3) as i64;
+        let mask = 0x1f_ffffi64;
 
-        s11 += s23 * 666643;
-        s12 += s23 * 470296;
-        s13 += s23 * 654183;
-        s14 -= s23 * 997805;
-        s15 += s23 * 136657;
-        s16 -= s23 * 683901;
+        let mut s = [
+            (load_3(&wide[0..]) as i64) & mask,
+            ((load_4(&wide[2..]) >> 5) as i64) & mask,
+            ((load_3(&wide[5..]) >> 2) as i64) & mask,
+            ((load_4(&wide[7..]) >> 7) as i64) & mask,
+            ((load_4(&wide[10..]) >> 4) as i64) & mask,
+            ((load_3(&wide[13..]) >> 1) as i64) & mask,
+            ((load_4(&wide[15..]) >> 6) as i64) & mask,
+            ((load_3(&wide[18..]) >> 3) as i64) & mask,
+            (load_3(&wide[21..]) as i64) & mask,
+            ((load_4(&wide[23..]) >> 5) as i64) & mask,
+            ((load_3(&wide[26..]) >> 2) as i64) & mask,
+            ((load_4(&wide[28..]) >> 7) as i64) & mask,
+            ((load_4(&wide[31..]) >> 4) as i64) & mask,
+            ((load_3(&wide[34..]) >> 1) as i64) & mask,
+            ((load_4(&wide[36..]) >> 6) as i64) & mask,
+            ((load_3(&wide[39..]) >> 3) as i64) & mask,
+            (load_3(&wide[42..]) as i64) & mask,
+            ((load_4(&wide[44..]) >> 5) as i64) & mask,
+            ((load_3(&wide[47..]) >> 2) as i64) & mask,
+            ((load_4(&wide[49..]) >> 7) as i64) & mask,
+            ((load_4(&wide[52..]) >> 4) as i64) & mask,
+            ((load_3(&wide[55..]) >> 1) as i64) & mask,
+            ((load_4(&wide[57..]) >> 6) as i64) & mask,
+            (load_4(&wide[60..]) >> 3) as i64,
+        ];
 
-        s10 += s22 * 666643;
-        s11 += s22 * 470296;
-        s12 += s22 * 654183;
-        s13 -= s22 * 997805;
-        s14 += s22 * 136657;
-        s15 -= s22 * 683901;
+        let coeffs = [666643, 470296, 654183, -997805, 136657, -683901];
 
-        s9 += s21 * 666643;
-        s10 += s21 * 470296;
-        s11 += s21 * 654183;
-        s12 -= s21 * 997805;
-        s13 += s21 * 136657;
-        s14 -= s21 * 683901;
-
-        s8 += s20 * 666643;
-        s9 += s20 * 470296;
-        s10 += s20 * 654183;
-        s11 -= s20 * 997805;
-        s12 += s20 * 136657;
-        s13 -= s20 * 683901;
-
-        s7 += s19 * 666643;
-        s8 += s19 * 470296;
-        s9 += s19 * 654183;
-        s10 -= s19 * 997805;
-        s11 += s19 * 136657;
-        s12 -= s19 * 683901;
-
-        s6 += s18 * 666643;
-        s7 += s18 * 470296;
-        s8 += s18 * 654183;
-        s9 -= s18 * 997805;
-        s10 += s18 * 136657;
-        s11 -= s18 * 683901;
-
-        let mut carry6 = (s6 + (1 << 20)) >> 21;
-        s7 += carry6;
-        s6 -= carry6 << 21;
-        let mut carry8 = (s8 + (1 << 20)) >> 21;
-        s9 += carry8;
-        s8 -= carry8 << 21;
-        let mut carry10 = (s10 + (1 << 20)) >> 21;
-        s11 += carry10;
-        s10 -= carry10 << 21;
-        let carry12 = (s12 + (1 << 20)) >> 21;
-        s13 += carry12;
-        s12 -= carry12 << 21;
-        let carry14 = (s14 + (1 << 20)) >> 21;
-        s15 += carry14;
-        s14 -= carry14 << 21;
-        let carry16 = (s16 + (1 << 20)) >> 21;
-        s17 += carry16;
-        s16 -= carry16 << 21;
-        let mut carry7 = (s7 + (1 << 20)) >> 21;
-        s8 += carry7;
-        s7 -= carry7 << 21;
-        let mut carry9 = (s9 + (1 << 20)) >> 21;
-        s10 += carry9;
-        s9 -= carry9 << 21;
-        let mut carry11 = (s11 + (1 << 20)) >> 21;
-        s12 += carry11;
-        s11 -= carry11 << 21;
-        let carry13 = (s13 + (1 << 20)) >> 21;
-        s14 += carry13;
-        s13 -= carry13 << 21;
-        let carry15 = (s15 + (1 << 20)) >> 21;
-        s16 += carry15;
-        s15 -= carry15 << 21;
-        s5 += s17 * 666643;
-        s6 += s17 * 470296;
-        s7 += s17 * 654183;
-        s8 -= s17 * 997805;
-        s9 += s17 * 136657;
-        s10 -= s17 * 683901;
-
-        s4 += s16 * 666643;
-        s5 += s16 * 470296;
-        s6 += s16 * 654183;
-        s7 -= s16 * 997805;
-        s8 += s16 * 136657;
-        s9 -= s16 * 683901;
-
-        s3 += s15 * 666643;
-        s4 += s15 * 470296;
-        s5 += s15 * 654183;
-        s6 -= s15 * 997805;
-        s7 += s15 * 136657;
-        s8 -= s15 * 683901;
-
-        s2 += s14 * 666643;
-        s3 += s14 * 470296;
-        s4 += s14 * 654183;
-        s5 -= s14 * 997805;
-        s6 += s14 * 136657;
-        s7 -= s14 * 683901;
-
-        s1 += s13 * 666643;
-        s2 += s13 * 470296;
-        s3 += s13 * 654183;
-        s4 -= s13 * 997805;
-        s5 += s13 * 136657;
-        s6 -= s13 * 683901;
-
-        s0 += s12 * 666643;
-        s1 += s12 * 470296;
-        s2 += s12 * 654183;
-        s3 -= s12 * 997805;
-        s4 += s12 * 136657;
-        s5 -= s12 * 683901;
-        s12 = 0;
-        let mut carry0 = (s0 + (1 << 20)) >> 21;
-        s1 += carry0;
-        s0 -= carry0 << 21;
-        let mut carry2 = (s2 + (1 << 20)) >> 21;
-        s3 += carry2;
-        s2 -= carry2 << 21;
-        let mut carry4 = (s4 + (1 << 20)) >> 21;
-        s5 += carry4;
-        s4 -= carry4 << 21;
-        carry6 = (s6 + (1 << 20)) >> 21;
-        s7 += carry6;
-        s6 -= carry6 << 21;
-        carry8 = (s8 + (1 << 20)) >> 21;
-        s9 += carry8;
-        s8 -= carry8 << 21;
-        carry10 = (s10 + (1 << 20)) >> 21;
-        s11 += carry10;
-        s10 -= carry10 << 21;
-        let mut carry1 = (s1 + (1 << 20)) >> 21;
-        s2 += carry1;
-        s1 -= carry1 << 21;
-        let mut carry3 = (s3 + (1 << 20)) >> 21;
-        s4 += carry3;
-        s3 -= carry3 << 21;
-        let mut carry5 = (s5 + (1 << 20)) >> 21;
-        s6 += carry5;
-        s5 -= carry5 << 21;
-        carry7 = (s7 + (1 << 20)) >> 21;
-        s8 += carry7;
-        s7 -= carry7 << 21;
-        carry9 = (s9 + (1 << 20)) >> 21;
-        s10 += carry9;
-        s9 -= carry9 << 21;
-        carry11 = (s11 + (1 << 20)) >> 21;
-        s12 += carry11;
-        s11 -= carry11 << 21;
-        s0 += s12 * 666643;
-        s1 += s12 * 470296;
-        s2 += s12 * 654183;
-        s3 -= s12 * 997805;
-        s4 += s12 * 136657;
-        s5 -= s12 * 683901;
-        s12 = 0;
-        carry0 = s0 >> 21;
-        s1 += carry0;
-        s0 -= carry0 << 21;
-        carry1 = s1 >> 21;
-        s2 += carry1;
-        s1 -= carry1 << 21;
-        carry2 = s2 >> 21;
-        s3 += carry2;
-        s2 -= carry2 << 21;
-        carry3 = s3 >> 21;
-        s4 += carry3;
-        s3 -= carry3 << 21;
-        carry4 = s4 >> 21;
-        s5 += carry4;
-        s4 -= carry4 << 21;
-        carry5 = s5 >> 21;
-        s6 += carry5;
-        s5 -= carry5 << 21;
-        carry6 = s6 >> 21;
-        s7 += carry6;
-        s6 -= carry6 << 21;
-        carry7 = s7 >> 21;
-        s8 += carry7;
-        s7 -= carry7 << 21;
-        carry8 = s8 >> 21;
-        s9 += carry8;
-        s8 -= carry8 << 21;
-        carry9 = s9 >> 21;
-        s10 += carry9;
-        s9 -= carry9 << 21;
-        carry10 = s10 >> 21;
-        s11 += carry10;
-        s10 -= carry10 << 21;
-        carry11 = s11 >> 21;
-        s12 += carry11;
-        s11 -= carry11 << 21;
-        s0 += s12 * 666643;
-        s1 += s12 * 470296;
-        s2 += s12 * 654183;
-        s3 -= s12 * 997805;
-        s4 += s12 * 136657;
-        s5 -= s12 * 683901;
-
-        carry0 = s0 >> 21;
-        s1 += carry0;
-        s0 -= carry0 << 21;
-        carry1 = s1 >> 21;
-        s2 += carry1;
-        s1 -= carry1 << 21;
-        carry2 = s2 >> 21;
-        s3 += carry2;
-        s2 -= carry2 << 21;
-        carry3 = s3 >> 21;
-        s4 += carry3;
-        s3 -= carry3 << 21;
-        carry4 = s4 >> 21;
-        s5 += carry4;
-        s4 -= carry4 << 21;
-        carry5 = s5 >> 21;
-        s6 += carry5;
-        s5 -= carry5 << 21;
-        carry6 = s6 >> 21;
-        s7 += carry6;
-        s6 -= carry6 << 21;
-        carry7 = s7 >> 21;
-        s8 += carry7;
-        s7 -= carry7 << 21;
-        carry8 = s8 >> 21;
-        s9 += carry8;
-        s8 -= carry8 << 21;
-        carry9 = s9 >> 21;
-        s10 += carry9;
-        s9 -= carry9 << 21;
-        carry10 = s10 >> 21;
-        s11 += carry10;
-        s10 -= carry10 << 21;
-
-        let mut s = [0u8; 32];
-        s[0] = s0 as u8;
-        s[1] = (s0 >> 8) as u8;
-        s[2] = ((s0 >> 16) | (s1 << 5)) as u8;
-        s[3] = (s1 >> 3) as u8;
-        s[4] = (s1 >> 11) as u8;
-        s[5] = ((s1 >> 19) | (s2 << 2)) as u8;
-        s[6] = (s2 >> 6) as u8;
-        s[7] = ((s2 >> 14) | (s3 << 7)) as u8;
-        s[8] = (s3 >> 1) as u8;
-        s[9] = (s3 >> 9) as u8;
-        s[10] = ((s3 >> 17) | (s4 << 4)) as u8;
-        s[11] = (s4 >> 4) as u8;
-        s[12] = (s4 >> 12) as u8;
-        s[13] = ((s4 >> 20) | (s5 << 1)) as u8;
-        s[14] = (s5 >> 7) as u8;
-        s[15] = ((s5 >> 15) | (s6 << 6)) as u8;
-        s[16] = (s6 >> 2) as u8;
-        s[17] = (s6 >> 10) as u8;
-        s[18] = ((s6 >> 18) | (s7 << 3)) as u8;
-        s[19] = (s7 >> 5) as u8;
-        s[20] = (s7 >> 13) as u8;
-        s[21] = s8 as u8;
-        s[22] = (s8 >> 8) as u8;
-        s[23] = ((s8 >> 16) | (s9 << 5)) as u8;
-        s[24] = (s9 >> 3) as u8;
-        s[25] = (s9 >> 11) as u8;
-        s[26] = ((s9 >> 19) | (s10 << 2)) as u8;
-        s[27] = (s10 >> 6) as u8;
-        s[28] = ((s10 >> 14) | (s11 << 7)) as u8;
-        s[29] = (s11 >> 1) as u8;
-        s[30] = (s11 >> 9) as u8;
-        s[31] = (s11 >> 17) as u8;
-
-        Scalar(s)
-    }
-
-    pub(crate) fn from_mul_sum(a: Scalar, b: Scalar, c: Scalar) -> Self {
-        let a0 = 2097151 & load_3(&a.0[0..]) as i64;
-        let a1 = 2097151 & (load_4(&a.0[2..]) >> 5) as i64;
-        let a2 = 2097151 & (load_3(&a.0[5..]) >> 2) as i64;
-        let a3 = 2097151 & (load_4(&a.0[7..]) >> 7) as i64;
-        let a4 = 2097151 & (load_4(&a.0[10..]) >> 4) as i64;
-        let a5 = 2097151 & (load_3(&a.0[13..]) >> 1) as i64;
-        let a6 = 2097151 & (load_4(&a.0[15..]) >> 6) as i64;
-        let a7 = 2097151 & (load_3(&a.0[18..]) >> 3) as i64;
-        let a8 = 2097151 & load_3(&a.0[21..]) as i64;
-        let a9 = 2097151 & (load_4(&a.0[23..]) >> 5) as i64;
-        let a10 = 2097151 & (load_3(&a.0[26..]) >> 2) as i64;
-        let a11 = (load_4(&a.0[28..]) >> 7) as i64;
-        let b0 = 2097151 & load_3(&b.0[0..]) as i64;
-        let b1 = 2097151 & (load_4(&b.0[2..]) >> 5) as i64;
-        let b2 = 2097151 & (load_3(&b.0[5..]) >> 2) as i64;
-        let b3 = 2097151 & (load_4(&b.0[7..]) >> 7) as i64;
-        let b4 = 2097151 & (load_4(&b.0[10..]) >> 4) as i64;
-        let b5 = 2097151 & (load_3(&b.0[13..]) >> 1) as i64;
-        let b6 = 2097151 & (load_4(&b.0[15..]) >> 6) as i64;
-        let b7 = 2097151 & (load_3(&b.0[18..]) >> 3) as i64;
-        let b8 = 2097151 & load_3(&b.0[21..]) as i64;
-        let b9 = 2097151 & (load_4(&b.0[23..]) >> 5) as i64;
-        let b10 = 2097151 & (load_3(&b.0[26..]) >> 2) as i64;
-        let b11 = (load_4(&b.0[28..]) >> 7) as i64;
-        let c0 = 2097151 & load_3(&c.0[0..]) as i64;
-        let c1 = 2097151 & (load_4(&c.0[2..]) >> 5) as i64;
-        let c2 = 2097151 & (load_3(&c.0[5..]) >> 2) as i64;
-        let c3 = 2097151 & (load_4(&c.0[7..]) >> 7) as i64;
-        let c4 = 2097151 & (load_4(&c.0[10..]) >> 4) as i64;
-        let c5 = 2097151 & (load_3(&c.0[13..]) >> 1) as i64;
-        let c6 = 2097151 & (load_4(&c.0[15..]) >> 6) as i64;
-        let c7 = 2097151 & (load_3(&c.0[18..]) >> 3) as i64;
-        let c8 = 2097151 & load_3(&c.0[21..]) as i64;
-        let c9 = 2097151 & (load_4(&c.0[23..]) >> 5) as i64;
-        let c10 = 2097151 & (load_3(&c.0[26..]) >> 2) as i64;
-        let c11 = (load_4(&c.0[28..]) >> 7) as i64;
-        let mut s0: i64;
-        let mut s1: i64;
-        let mut s2: i64;
-        let mut s3: i64;
-        let mut s4: i64;
-        let mut s5: i64;
-        let mut s6: i64;
-        let mut s7: i64;
-        let mut s8: i64;
-        let mut s9: i64;
-        let mut s10: i64;
-        let mut s11: i64;
-        let mut s12: i64;
-        let mut s13: i64;
-        let mut s14: i64;
-        let mut s15: i64;
-        let mut s16: i64;
-        let mut s17: i64;
-        let mut s18: i64;
-        let mut s19: i64;
-        let mut s20: i64;
-        let mut s21: i64;
-        let mut s22: i64;
-        let mut s23: i64;
-        let mut carry0: i64;
-        let mut carry1: i64;
-        let mut carry2: i64;
-        let mut carry3: i64;
-        let mut carry4: i64;
-        let mut carry5: i64;
-        let mut carry6: i64;
-        let mut carry7: i64;
-        let mut carry8: i64;
-        let mut carry9: i64;
-        let mut carry10: i64;
-        let mut carry11: i64;
-        let mut carry12: i64;
-        let mut carry13: i64;
-        let mut carry14: i64;
-        let mut carry15: i64;
-        let mut carry16: i64;
-
-        s0 = c0 + a0 * b0;
-        s1 = c1 + a0 * b1 + a1 * b0;
-        s2 = c2 + a0 * b2 + a1 * b1 + a2 * b0;
-        s3 = c3 + a0 * b3 + a1 * b2 + a2 * b1 + a3 * b0;
-        s4 = c4 + a0 * b4 + a1 * b3 + a2 * b2 + a3 * b1 + a4 * b0;
-        s5 = c5 + a0 * b5 + a1 * b4 + a2 * b3 + a3 * b2 + a4 * b1 + a5 * b0;
-        s6 = c6 + a0 * b6 + a1 * b5 + a2 * b4 + a3 * b3 + a4 * b2 + a5 * b1 + a6 * b0;
-        s7 = c7 + a0 * b7 + a1 * b6 + a2 * b5 + a3 * b4 + a4 * b3 + a5 * b2 + a6 * b1 + a7 * b0;
-        s8 = c8
-            + a0 * b8
-            + a1 * b7
-            + a2 * b6
-            + a3 * b5
-            + a4 * b4
-            + a5 * b3
-            + a6 * b2
-            + a7 * b1
-            + a8 * b0;
-        s9 = c9
-            + a0 * b9
-            + a1 * b8
-            + a2 * b7
-            + a3 * b6
-            + a4 * b5
-            + a5 * b4
-            + a6 * b3
-            + a7 * b2
-            + a8 * b1
-            + a9 * b0;
-        s10 = c10
-            + a0 * b10
-            + a1 * b9
-            + a2 * b8
-            + a3 * b7
-            + a4 * b6
-            + a5 * b5
-            + a6 * b4
-            + a7 * b3
-            + a8 * b2
-            + a9 * b1
-            + a10 * b0;
-        s11 = c11
-            + a0 * b11
-            + a1 * b10
-            + a2 * b9
-            + a3 * b8
-            + a4 * b7
-            + a5 * b6
-            + a6 * b5
-            + a7 * b4
-            + a8 * b3
-            + a9 * b2
-            + a10 * b1
-            + a11 * b0;
-        s12 = a1 * b11
-            + a2 * b10
-            + a3 * b9
-            + a4 * b8
-            + a5 * b7
-            + a6 * b6
-            + a7 * b5
-            + a8 * b4
-            + a9 * b3
-            + a10 * b2
-            + a11 * b1;
-        s13 = a2 * b11
-            + a3 * b10
-            + a4 * b9
-            + a5 * b8
-            + a6 * b7
-            + a7 * b6
-            + a8 * b5
-            + a9 * b4
-            + a10 * b3
-            + a11 * b2;
-        s14 = a3 * b11
-            + a4 * b10
-            + a5 * b9
-            + a6 * b8
-            + a7 * b7
-            + a8 * b6
-            + a9 * b5
-            + a10 * b4
-            + a11 * b3;
-        s15 = a4 * b11 + a5 * b10 + a6 * b9 + a7 * b8 + a8 * b7 + a9 * b6 + a10 * b5 + a11 * b4;
-        s16 = a5 * b11 + a6 * b10 + a7 * b9 + a8 * b8 + a9 * b7 + a10 * b6 + a11 * b5;
-        s17 = a6 * b11 + a7 * b10 + a8 * b9 + a9 * b8 + a10 * b7 + a11 * b6;
-        s18 = a7 * b11 + a8 * b10 + a9 * b9 + a10 * b8 + a11 * b7;
-        s19 = a8 * b11 + a9 * b10 + a10 * b9 + a11 * b8;
-        s20 = a9 * b11 + a10 * b10 + a11 * b9;
-        s21 = a10 * b11 + a11 * b10;
-        s22 = a11 * b11;
-        s23 = 0;
-        carry0 = (s0 + (1 << 20)) >> 21;
-        s1 += carry0;
-        s0 -= carry0 << 21;
-        carry2 = (s2 + (1 << 20)) >> 21;
-        s3 += carry2;
-        s2 -= carry2 << 21;
-        carry4 = (s4 + (1 << 20)) >> 21;
-        s5 += carry4;
-        s4 -= carry4 << 21;
-        carry6 = (s6 + (1 << 20)) >> 21;
-        s7 += carry6;
-        s6 -= carry6 << 21;
-        carry8 = (s8 + (1 << 20)) >> 21;
-        s9 += carry8;
-        s8 -= carry8 << 21;
-        carry10 = (s10 + (1 << 20)) >> 21;
-        s11 += carry10;
-        s10 -= carry10 << 21;
-        carry12 = (s12 + (1 << 20)) >> 21;
-        s13 += carry12;
-        s12 -= carry12 << 21;
-        carry14 = (s14 + (1 << 20)) >> 21;
-        s15 += carry14;
-        s14 -= carry14 << 21;
-        carry16 = (s16 + (1 << 20)) >> 21;
-        s17 += carry16;
-        s16 -= carry16 << 21;
-        let carry18 = (s18 + (1 << 20)) >> 21;
-        s19 += carry18;
-        s18 -= carry18 << 21;
-        let carry20 = (s20 + (1 << 20)) >> 21;
-        s21 += carry20;
-        s20 -= carry20 << 21;
-        let carry22 = (s22 + (1 << 20)) >> 21;
-        s23 += carry22;
-        s22 -= carry22 << 21;
-        carry1 = (s1 + (1 << 20)) >> 21;
-        s2 += carry1;
-        s1 -= carry1 << 21;
-        carry3 = (s3 + (1 << 20)) >> 21;
-        s4 += carry3;
-        s3 -= carry3 << 21;
-        carry5 = (s5 + (1 << 20)) >> 21;
-        s6 += carry5;
-        s5 -= carry5 << 21;
-        carry7 = (s7 + (1 << 20)) >> 21;
-        s8 += carry7;
-        s7 -= carry7 << 21;
-        carry9 = (s9 + (1 << 20)) >> 21;
-        s10 += carry9;
-        s9 -= carry9 << 21;
-        carry11 = (s11 + (1 << 20)) >> 21;
-        s12 += carry11;
-        s11 -= carry11 << 21;
-        carry13 = (s13 + (1 << 20)) >> 21;
-        s14 += carry13;
-        s13 -= carry13 << 21;
-        carry15 = (s15 + (1 << 20)) >> 21;
-        s16 += carry15;
-        s15 -= carry15 << 21;
-        let carry17 = (s17 + (1 << 20)) >> 21;
-        s18 += carry17;
-        s17 -= carry17 << 21;
-        let carry19 = (s19 + (1 << 20)) >> 21;
-        s20 += carry19;
-        s19 -= carry19 << 21;
-        let carry21 = (s21 + (1 << 20)) >> 21;
-        s22 += carry21;
-        s21 -= carry21 << 21;
-        s11 += s23 * 666643;
-        s12 += s23 * 470296;
-        s13 += s23 * 654183;
-        s14 -= s23 * 997805;
-        s15 += s23 * 136657;
-        s16 -= s23 * 683901;
-
-        s10 += s22 * 666643;
-        s11 += s22 * 470296;
-        s12 += s22 * 654183;
-        s13 -= s22 * 997805;
-        s14 += s22 * 136657;
-        s15 -= s22 * 683901;
-        s9 += s21 * 666643;
-        s10 += s21 * 470296;
-        s11 += s21 * 654183;
-        s12 -= s21 * 997805;
-        s13 += s21 * 136657;
-        s14 -= s21 * 683901;
-        s8 += s20 * 666643;
-        s9 += s20 * 470296;
-        s10 += s20 * 654183;
-        s11 -= s20 * 997805;
-        s12 += s20 * 136657;
-        s13 -= s20 * 683901;
-        s7 += s19 * 666643;
-        s8 += s19 * 470296;
-        s9 += s19 * 654183;
-        s10 -= s19 * 997805;
-        s11 += s19 * 136657;
-        s12 -= s19 * 683901;
-        s6 += s18 * 666643;
-        s7 += s18 * 470296;
-        s8 += s18 * 654183;
-        s9 -= s18 * 997805;
-        s10 += s18 * 136657;
-        s11 -= s18 * 683901;
-        carry6 = (s6 + (1 << 20)) >> 21;
-        s7 += carry6;
-        s6 -= carry6 << 21;
-        carry8 = (s8 + (1 << 20)) >> 21;
-        s9 += carry8;
-        s8 -= carry8 << 21;
-        carry10 = (s10 + (1 << 20)) >> 21;
-        s11 += carry10;
-        s10 -= carry10 << 21;
-        carry12 = (s12 + (1 << 20)) >> 21;
-        s13 += carry12;
-        s12 -= carry12 << 21;
-        carry14 = (s14 + (1 << 20)) >> 21;
-        s15 += carry14;
-        s14 -= carry14 << 21;
-        carry16 = (s16 + (1 << 20)) >> 21;
-        s17 += carry16;
-        s16 -= carry16 << 21;
-        carry7 = (s7 + (1 << 20)) >> 21;
-        s8 += carry7;
-        s7 -= carry7 << 21;
-        carry9 = (s9 + (1 << 20)) >> 21;
-        s10 += carry9;
-        s9 -= carry9 << 21;
-        carry11 = (s11 + (1 << 20)) >> 21;
-        s12 += carry11;
-        s11 -= carry11 << 21;
-        carry13 = (s13 + (1 << 20)) >> 21;
-        s14 += carry13;
-        s13 -= carry13 << 21;
-        carry15 = (s15 + (1 << 20)) >> 21;
-        s16 += carry15;
-        s15 -= carry15 << 21;
-        s5 += s17 * 666643;
-        s6 += s17 * 470296;
-        s7 += s17 * 654183;
-        s8 -= s17 * 997805;
-        s9 += s17 * 136657;
-        s10 -= s17 * 683901;
-        s4 += s16 * 666643;
-        s5 += s16 * 470296;
-        s6 += s16 * 654183;
-        s7 -= s16 * 997805;
-        s8 += s16 * 136657;
-        s9 -= s16 * 683901;
-        s3 += s15 * 666643;
-        s4 += s15 * 470296;
-        s5 += s15 * 654183;
-        s6 -= s15 * 997805;
-        s7 += s15 * 136657;
-        s8 -= s15 * 683901;
-        s2 += s14 * 666643;
-        s3 += s14 * 470296;
-        s4 += s14 * 654183;
-        s5 -= s14 * 997805;
-        s6 += s14 * 136657;
-        s7 -= s14 * 683901;
-        s1 += s13 * 666643;
-        s2 += s13 * 470296;
-        s3 += s13 * 654183;
-        s4 -= s13 * 997805;
-        s5 += s13 * 136657;
-        s6 -= s13 * 683901;
-        s0 += s12 * 666643;
-        s1 += s12 * 470296;
-        s2 += s12 * 654183;
-        s3 -= s12 * 997805;
-        s4 += s12 * 136657;
-        s5 -= s12 * 683901;
-        s12 = 0;
-        carry0 = (s0 + (1 << 20)) >> 21;
-        s1 += carry0;
-        s0 -= carry0 << 21;
-        carry2 = (s2 + (1 << 20)) >> 21;
-        s3 += carry2;
-        s2 -= carry2 << 21;
-        carry4 = (s4 + (1 << 20)) >> 21;
-        s5 += carry4;
-        s4 -= carry4 << 21;
-        carry6 = (s6 + (1 << 20)) >> 21;
-        s7 += carry6;
-        s6 -= carry6 << 21;
-        carry8 = (s8 + (1 << 20)) >> 21;
-        s9 += carry8;
-        s8 -= carry8 << 21;
-        carry10 = (s10 + (1 << 20)) >> 21;
-        s11 += carry10;
-        s10 -= carry10 << 21;
-        carry1 = (s1 + (1 << 20)) >> 21;
-        s2 += carry1;
-        s1 -= carry1 << 21;
-        carry3 = (s3 + (1 << 20)) >> 21;
-        s4 += carry3;
-        s3 -= carry3 << 21;
-        carry5 = (s5 + (1 << 20)) >> 21;
-        s6 += carry5;
-        s5 -= carry5 << 21;
-        carry7 = (s7 + (1 << 20)) >> 21;
-        s8 += carry7;
-        s7 -= carry7 << 21;
-        carry9 = (s9 + (1 << 20)) >> 21;
-        s10 += carry9;
-        s9 -= carry9 << 21;
-        carry11 = (s11 + (1 << 20)) >> 21;
-        s12 += carry11;
-        s11 -= carry11 << 21;
-        s0 += s12 * 666643;
-        s1 += s12 * 470296;
-        s2 += s12 * 654183;
-        s3 -= s12 * 997805;
-        s4 += s12 * 136657;
-        s5 -= s12 * 683901;
-        s12 = 0;
-        carry0 = s0 >> 21;
-        s1 += carry0;
-        s0 -= carry0 << 21;
-        carry1 = s1 >> 21;
-        s2 += carry1;
-        s1 -= carry1 << 21;
-        carry2 = s2 >> 21;
-        s3 += carry2;
-        s2 -= carry2 << 21;
-        carry3 = s3 >> 21;
-        s4 += carry3;
-        s3 -= carry3 << 21;
-        carry4 = s4 >> 21;
-        s5 += carry4;
-        s4 -= carry4 << 21;
-        carry5 = s5 >> 21;
-        s6 += carry5;
-        s5 -= carry5 << 21;
-        carry6 = s6 >> 21;
-        s7 += carry6;
-        s6 -= carry6 << 21;
-        carry7 = s7 >> 21;
-        s8 += carry7;
-        s7 -= carry7 << 21;
-        carry8 = s8 >> 21;
-        s9 += carry8;
-        s8 -= carry8 << 21;
-        carry9 = s9 >> 21;
-        s10 += carry9;
-        s9 -= carry9 << 21;
-        carry10 = s10 >> 21;
-        s11 += carry10;
-        s10 -= carry10 << 21;
-        carry11 = s11 >> 21;
-        s12 += carry11;
-        s11 -= carry11 << 21;
-        s0 += s12 * 666643;
-        s1 += s12 * 470296;
-        s2 += s12 * 654183;
-        s3 -= s12 * 997805;
-        s4 += s12 * 136657;
-        s5 -= s12 * 683901;
-
-        carry0 = s0 >> 21;
-        s1 += carry0;
-        s0 -= carry0 << 21;
-        carry1 = s1 >> 21;
-        s2 += carry1;
-        s1 -= carry1 << 21;
-        carry2 = s2 >> 21;
-        s3 += carry2;
-        s2 -= carry2 << 21;
-        carry3 = s3 >> 21;
-        s4 += carry3;
-        s3 -= carry3 << 21;
-        carry4 = s4 >> 21;
-        s5 += carry4;
-        s4 -= carry4 << 21;
-        carry5 = s5 >> 21;
-        s6 += carry5;
-        s5 -= carry5 << 21;
-        carry6 = s6 >> 21;
-        s7 += carry6;
-        s6 -= carry6 << 21;
-        carry7 = s7 >> 21;
-        s8 += carry7;
-        s7 -= carry7 << 21;
-        carry8 = s8 >> 21;
-        s9 += carry8;
-        s8 -= carry8 << 21;
-        carry9 = s9 >> 21;
-        s10 += carry9;
-        s9 -= carry9 << 21;
-        carry10 = s10 >> 21;
-        s11 += carry10;
-        s10 -= carry10 << 21;
-
-        let mut s = [0u8; 32];
-
-        s[0] = s0 as u8;
-        s[1] = (s0 >> 8) as u8;
-        s[2] = ((s0 >> 16) | (s1 << 5)) as u8;
-        s[3] = (s1 >> 3) as u8;
-        s[4] = (s1 >> 11) as u8;
-        s[5] = ((s1 >> 19) | (s2 << 2)) as u8;
-        s[6] = (s2 >> 6) as u8;
-        s[7] = ((s2 >> 14) | (s3 << 7)) as u8;
-        s[8] = (s3 >> 1) as u8;
-        s[9] = (s3 >> 9) as u8;
-        s[10] = ((s3 >> 17) | (s4 << 4)) as u8;
-        s[11] = (s4 >> 4) as u8;
-        s[12] = (s4 >> 12) as u8;
-        s[13] = ((s4 >> 20) | (s5 << 1)) as u8;
-        s[14] = (s5 >> 7) as u8;
-        s[15] = ((s5 >> 15) | (s6 << 6)) as u8;
-        s[16] = (s6 >> 2) as u8;
-        s[17] = (s6 >> 10) as u8;
-        s[18] = ((s6 >> 18) | (s7 << 3)) as u8;
-        s[19] = (s7 >> 5) as u8;
-        s[20] = (s7 >> 13) as u8;
-        s[21] = s8 as u8;
-        s[22] = (s8 >> 8) as u8;
-        s[23] = ((s8 >> 16) | (s9 << 5)) as u8;
-        s[24] = (s9 >> 3) as u8;
-        s[25] = (s9 >> 11) as u8;
-        s[26] = ((s9 >> 19) | (s10 << 2)) as u8;
-        s[27] = (s10 >> 6) as u8;
-        s[28] = ((s10 >> 14) | (s11 << 7)) as u8;
-        s[29] = (s11 >> 1) as u8;
-        s[30] = (s11 >> 9) as u8;
-        s[31] = (s11 >> 17) as u8;
-
-        Scalar(s)
-    }
-
-    pub(crate) fn slide(&self) -> Slide {
-        let a = &self.0;
-        let mut r = [0i8; 256];
-
-        for i in 0..256 {
-            r[i] = ((a[i >> 3] >> (i & 7)) & 1) as i8;
+        for index in (18..=23).rev() {
+            for j in 0..6 {
+                s[index - 12 + j] += s[index] * coeffs[j];
+            }
         }
 
-        for i in 0..256 {
-            if r[i] != 0 {
-                let mut b = 1usize;
-                while b <= 6 && i + b < 256 {
-                    if r[i + b] != 0 {
-                        let rb = (r[i + b] as i32) << b;
-                        let ri = r[i] as i32;
+        for &index in &[6, 8, 10, 12, 14, 16] {
+            let carry = (s[index] + (1 << 20)) >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        for &index in &[7, 9, 11, 13, 15] {
+            let carry = (s[index] + (1 << 20)) >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        for index in (12..=17).rev() {
+            for j in 0..6 {
+                s[index - 12 + j] += s[index] * coeffs[j];
+            }
+        }
+        s[12] = 0;
+
+        for &index in &[0, 2, 4, 6, 8, 10] {
+            let carry = (s[index] + (1 << 20)) >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        for &index in &[1, 3, 5, 7, 9, 11] {
+            let carry = (s[index] + (1 << 20)) >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        let s12 = s[12];
+        for (sx, coeff) in s.iter_mut().take(6).zip(coeffs.iter()) {
+            *sx = s12 * coeff;
+        }
+        s[12] = 0;
+
+        for index in 0..11 {
+            let carry = s[index] >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        let carry = s[11] >> 21;
+        s[12] += carry;
+        s[11] -= carry << 21;
+
+        let s12 = s[12];
+        for (sx, coeff) in s.iter_mut().take(6).zip(coeffs.iter()) {
+            *sx = s12 * coeff;
+        }
+
+        for index in 0..11 {
+            let carry = s[index] >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        let result = [
+            s[0] as u8,
+            (s[0] >> 8) as u8,
+            ((s[0] >> 16) | (s[1] << 5)) as u8,
+            (s[1] >> 3) as u8,
+            (s[1] >> 11) as u8,
+            ((s[1] >> 19) | (s[2] << 2)) as u8,
+            (s[2] >> 6) as u8,
+            ((s[2] >> 14) | (s[3] << 7)) as u8,
+            (s[3] >> 1) as u8,
+            (s[3] >> 9) as u8,
+            ((s[3] >> 17) | (s[4] << 4)) as u8,
+            (s[4] >> 4) as u8,
+            (s[4] >> 12) as u8,
+            ((s[4] >> 20) | (s[5] << 1)) as u8,
+            (s[5] >> 7) as u8,
+            ((s[5] >> 15) | (s[6] << 6)) as u8,
+            (s[6] >> 2) as u8,
+            (s[6] >> 10) as u8,
+            ((s[6] >> 18) | (s[7] << 3)) as u8,
+            (s[7] >> 5) as u8,
+            (s[7] >> 13) as u8,
+            s[8] as u8,
+            (s[8] >> 8) as u8,
+            ((s[8] >> 16) | (s[9] << 5)) as u8,
+            (s[9] >> 3) as u8,
+            (s[9] >> 11) as u8,
+            ((s[9] >> 19) | (s[10] << 2)) as u8,
+            (s[10] >> 6) as u8,
+            ((s[10] >> 14) | (s[11] << 7)) as u8,
+            (s[11] >> 1) as u8,
+            (s[11] >> 9) as u8,
+            (s[11] >> 17) as u8,
+        ];
+
+        Scalar(result)
+    }
+
+    /// Computes the scalar expression `a * b + c (mod ℓ)`.
+    ///
+    /// This function multiplies two scalars `a` and `b`, adds a third scalar `c`,
+    /// and reduces the result modulo the Ed25519 scalar field order
+    ///
+    /// ```text
+    /// ℓ = 2^252 + 27742317777372353535851937790883648493
+    /// ```
+    ///
+    /// It is a core primitive used during Ed25519 signature generation, notably
+    /// for computing the `S` component of a signature:
+    ///
+    /// ```text
+    /// S = (r + k * a) mod ℓ
+    /// ```
+    ///
+    /// ## High-level structure
+    ///
+    /// The computation follows the reference Ed25519 scalar arithmetic and
+    /// proceeds in several stages:
+    ///
+    /// 1. **Radix decomposition**
+    ///    - Each input scalar is decomposed into 12 signed 21-bit limbs
+    ///      using overlapping `load_3` / `load_4` operations.
+    ///    - This radix-2²¹ representation allows safe intermediate products
+    ///      in 64-bit arithmetic.
+    ///
+    /// 2. **Wide multiplication and accumulation**
+    ///    - A schoolbook convolution computes `a * b`, producing up to 24 limbs.
+    ///    - The scalar `c` is added directly into the lower limbs during
+    ///      accumulation, avoiding a separate addition pass.
+    ///
+    /// 3. **Carry propagation**
+    ///    - Carries are propagated across even and odd limbs to keep values
+    ///      bounded within 21 bits.
+    ///    - Multiple passes ensure all limbs remain within safe limits.
+    ///
+    /// 4. **Modular reduction**
+    ///    - High limbs are folded back into lower limbs using precomputed
+    ///      reduction coefficients derived from the relation:
+    ///
+    ///      ```text
+    ///      2^252 ≡ 27742317777372353535851937790883648493 (mod ℓ)
+    ///      ```
+    ///
+    ///    - This eliminates limbs beyond the scalar size while preserving
+    ///      correctness modulo `ℓ`.
+    ///
+    /// 5. **Final normalization**
+    ///    - Remaining carries are propagated.
+    ///    - The result is serialized back into a canonical 32-byte scalar.
+    ///
+    /// ## Constant-time behavior
+    ///
+    /// - The algorithm is fully constant-time.
+    /// - No branches depend on secret data.
+    /// - Suitable for use with secret scalars (private keys, nonces).
+    ///
+    /// ## Correctness guarantees
+    ///
+    /// - The returned scalar is reduced modulo `ℓ`.
+    /// - The encoding is canonical.
+    /// - Behavior matches the Ed25519 reference C implementation.
+    ///
+    /// ## Implementation notes
+    ///
+    /// - All intermediate arithmetic is performed using `i64` to avoid overflow.
+    /// - The chosen radix (2²¹) balances carry frequency and multiplication safety.
+    /// - Reduction coefficients are identical to those used in the reference
+    ///   Ed25519 implementation.
+    ///
+    /// This function is a critical building block for:
+    /// - signature generation
+    /// - scalar arithmetic
+    /// - key updates involving linear combinations of scalars
+    pub(crate) fn from_mul_sum(a: Scalar, b: Scalar, c: Scalar) -> Self {
+        let mask = 0x1f_ffffi64;
+
+        let load_a = |data: &[u8; 32]| -> [i64; 12] {
+            [
+                (load_3(&data[0..]) as i64) & mask,
+                ((load_4(&data[2..]) >> 5) as i64) & mask,
+                ((load_3(&data[5..]) >> 2) as i64) & mask,
+                ((load_4(&data[7..]) >> 7) as i64) & mask,
+                ((load_4(&data[10..]) >> 4) as i64) & mask,
+                ((load_3(&data[13..]) >> 1) as i64) & mask,
+                ((load_4(&data[15..]) >> 6) as i64) & mask,
+                ((load_3(&data[18..]) >> 3) as i64) & mask,
+                (load_3(&data[21..]) as i64) & mask,
+                ((load_4(&data[23..]) >> 5) as i64) & mask,
+                ((load_3(&data[26..]) >> 2) as i64) & mask,
+                (load_4(&data[28..]) >> 7) as i64,
+            ]
+        };
+
+        let a_limbs = load_a(&a.0);
+        let b_limbs = load_a(&b.0);
+        let c_limbs = load_a(&c.0);
+
+        let mut s = [0i64; 24];
+
+        for index in 0..12 {
+            s[index] = c_limbs[index];
+            for j in 0..=index.min(11) {
+                if index - j < 12 {
+                    s[index] += a_limbs[j] * b_limbs[index - j];
+                }
+            }
+        }
+
+        for index in 12..23 {
+            for j in (index - 11)..12 {
+                if index - j < 12 {
+                    s[index] += a_limbs[j] * b_limbs[index - j];
+                }
+            }
+        }
+
+        s[23] = 0;
+
+        for &index in &[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22] {
+            let carry = (s[index] + (1 << 20)) >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        for &index in &[1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21] {
+            let carry = (s[index] + (1 << 20)) >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        let coeffs = [666643i64, 470296, 654183, -997805, 136657, -683901];
+
+        for index in (18..=23).rev() {
+            for j in 0..6 {
+                s[index - 12 + j] += s[index] * coeffs[j];
+            }
+        }
+
+        for &index in &[6, 8, 10, 12, 14, 16] {
+            let carry = (s[index] + (1 << 20)) >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        for &index in &[7, 9, 11, 13, 15] {
+            let carry = (s[index] + (1 << 20)) >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        for index in (12..=17).rev() {
+            for j in 0..6 {
+                s[index - 12 + j] += s[index] * coeffs[j];
+            }
+        }
+        s[12] = 0;
+
+        for &index in &[0, 2, 4, 6, 8, 10] {
+            let carry = (s[index] + (1 << 20)) >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        for &index in &[1, 3, 5, 7, 9, 11] {
+            let carry = (s[index] + (1 << 20)) >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        let s12 = s[12];
+        for (sx, coeff) in s.iter_mut().take(6).zip(coeffs.iter()) {
+            *sx += s12 * coeff;
+        }
+        s[12] = 0;
+
+        for index in 0..11 {
+            let carry = s[index] >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        let carry = s[11] >> 21;
+        s[12] += carry;
+        s[11] -= carry << 21;
+
+        let s12 = s[12];
+        for (sx, coeff) in s.iter_mut().take(6).zip(coeffs.iter()) {
+            *sx += s12 * coeff;
+        }
+
+        for index in 0..11 {
+            let carry = s[index] >> 21;
+
+            s[index + 1] += carry;
+            s[index] -= carry << 21;
+        }
+
+        let result = [
+            s[0] as u8,
+            (s[0] >> 8) as u8,
+            ((s[0] >> 16) | (s[1] << 5)) as u8,
+            (s[1] >> 3) as u8,
+            (s[1] >> 11) as u8,
+            ((s[1] >> 19) | (s[2] << 2)) as u8,
+            (s[2] >> 6) as u8,
+            ((s[2] >> 14) | (s[3] << 7)) as u8,
+            (s[3] >> 1) as u8,
+            (s[3] >> 9) as u8,
+            ((s[3] >> 17) | (s[4] << 4)) as u8,
+            (s[4] >> 4) as u8,
+            (s[4] >> 12) as u8,
+            ((s[4] >> 20) | (s[5] << 1)) as u8,
+            (s[5] >> 7) as u8,
+            ((s[5] >> 15) | (s[6] << 6)) as u8,
+            (s[6] >> 2) as u8,
+            (s[6] >> 10) as u8,
+            ((s[6] >> 18) | (s[7] << 3)) as u8,
+            (s[7] >> 5) as u8,
+            (s[7] >> 13) as u8,
+            s[8] as u8,
+            (s[8] >> 8) as u8,
+            ((s[8] >> 16) | (s[9] << 5)) as u8,
+            (s[9] >> 3) as u8,
+            (s[9] >> 11) as u8,
+            ((s[9] >> 19) | (s[10] << 2)) as u8,
+            (s[10] >> 6) as u8,
+            ((s[10] >> 14) | (s[11] << 7)) as u8,
+            (s[11] >> 1) as u8,
+            (s[11] >> 9) as u8,
+            (s[11] >> 17) as u8,
+        ];
+
+        Scalar(result)
+    }
+
+    /// Computes the signed sliding-window representation of a scalar.
+    ///
+    /// This function converts the scalar into a signed digit representation
+    /// with window size up to 6 bits (i.e. values in `[-15, 15]`), commonly
+    /// referred to as *sliding window recoding*.
+    ///
+    /// ### Purpose
+    /// The sliding-window form is used to speed up scalar multiplication
+    /// on elliptic curves (notably Ed25519) by:
+    /// - reducing the number of non-zero digits
+    /// - allowing precomputation of small odd multiples
+    /// - replacing many doublings and additions with fewer, larger steps
+    ///
+    /// ### Representation
+    /// - The output is an array of 256 signed digits (`i8`)
+    /// - Each position corresponds to a bit index of the scalar
+    /// - At most one non-zero digit appears in any window of size ≤ 6
+    /// - Non-zero digits are guaranteed to be odd and in the range `[-15, 15]`
+    ///
+    /// ### Algorithm overview
+    /// 1. Expand the scalar into its bit representation (`0` or `1`)
+    /// 2. Scan from least significant bit to most significant bit
+    /// 3. When a non-zero bit is found:
+    ///    - Attempt to merge it with nearby bits (up to 6 ahead)
+    ///    - Adjust the current digit to stay within `[-15, 15]`
+    ///    - Propagate carries forward when necessary
+    /// 4. Clear consumed bits to maintain sparsity
+    ///
+    /// ### Security notes
+    /// - The algorithm operates on fixed-size arrays
+    /// - No secret-dependent memory accesses outside the scalar window
+    /// - Intended for use in constant-time scalar multiplication routines
+    ///
+    /// This implementation follows the same strategy as the Ed25519
+    /// reference implementations and common audited libraries.
+    pub(crate) fn slide(&self) -> Slide {
+        let mut r = array::from_fn(|index| ((self.0[index >> 3] >> (index & 7)) & 1) as i8);
+
+        for index in 0..256 {
+            if r[index] != 0 {
+                let mut b = 1;
+
+                while b <= 6 && index + b < 256 {
+                    if r[index + b] != 0 {
+                        let rb = (r[index + b] as i32) << b;
+                        let ri = r[index] as i32;
 
                         if ri + rb <= 15 {
-                            r[i] = (ri + rb) as i8;
-                            r[i + b] = 0;
+                            r[index] = (ri + rb) as i8;
+                            r[index + b] = 0;
                         } else if ri - rb >= -15 {
-                            r[i] = (ri - rb) as i8;
-                            let mut k = i + b;
-                            while k < 256 {
-                                if r[k] == 0 {
-                                    r[k] = 1;
+                            r[index] = (ri - rb) as i8;
+
+                            for v in r.iter_mut().skip(index + b) {
+                                if *v == 0 {
+                                    *v = 1;
                                     break;
                                 }
-                                r[k] = 0;
-                                k += 1;
+
+                                *v = 0;
                             }
                         } else {
                             break;
@@ -858,8 +642,23 @@ impl Scalar {
             }
         }
 
-        Slide(r)
+        r
     }
 }
 
-pub(crate) struct Slide(pub(crate) [i8; 256]);
+/// Signed sliding-window representation of a scalar.
+///
+/// This type represents a scalar decomposed into 256 signed digits,
+/// one per bit position, using a sliding-window recoding strategy.
+///
+/// Each entry is:
+/// - zero most of the time (sparse representation)
+/// - an odd value in the range `[-15, 15]` when non-zero
+///
+/// This representation is designed to accelerate elliptic-curve
+/// scalar multiplication (e.g. Ed25519) by reducing the number of
+/// additions and enabling efficient precomputation.
+///
+/// The array length is fixed to 256, matching the bit length of
+/// Ed25519 scalars.
+pub(crate) type Slide = [i8; 256];

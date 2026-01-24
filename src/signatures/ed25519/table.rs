@@ -1,3 +1,76 @@
+//! Ed25519 curve constants and precomputed tables.
+//!
+//! This module defines all fixed constants required for arithmetic on the
+//! Edwards25519 curve, as well as precomputed tables used to accelerate
+//! scalar multiplication.
+//!
+//! ## Curve definition
+//!
+//! Ed25519 is defined over the prime field:
+//!
+//! ```text
+//! p = 2^255 − 19
+//! ```
+//!
+//! with the twisted Edwards curve equation:
+//!
+//! ```text
+//! −x² + y² = 1 + d·x²·y²   (mod p)
+//! ```
+//!
+//! where `d` is a fixed field element defined in this module.
+//!
+//! ## Contents of this module
+//!
+//! This file provides:
+//!
+//! - Core Edwards curve constants (`D`, `D2`, `SQRTM1`)
+//! - Precomputed base-point tables (`BASE`, `BI`)
+//!
+//! These values are fundamental to:
+//!
+//! - point addition and subtraction
+//! - point doubling
+//! - point decompression
+//! - fixed-base and double-scalar multiplication
+//!
+//! ## Representation
+//!
+//! All constants are expressed as `FieldElement`s using the same limb-based
+//! radix representation (`[i32; 10]`) as the rest of the field arithmetic.
+//! This ensures:
+//!
+//! - zero runtime decoding cost
+//! - identical behavior to the reference Ed25519 implementations
+//! - safe reuse in constant-time arithmetic
+//!
+//! ## Precomputation tables
+//!
+//! The tables in this module are **static and immutable**:
+//!
+//! - `BASE` is a 4-bit window table of odd multiples of the canonical
+//!   Ed25519 base point
+//! - `BI` is a small auxiliary table used in mixed-coordinate and
+//!   double-scalar multiplication routines
+//!
+//! These tables are tightly coupled to the scalar recoding strategy used
+//! elsewhere in the implementation (radix-16 / sliding window).
+//!
+//! ## Security properties
+//!
+//! - All values are public constants
+//! - No secret data is stored or manipulated here
+//! - Tables are accessed through constant-time selection routines
+//!
+//! ## Design notes
+//!
+//! - All constants exactly match those used in the Ed25519 reference
+//!   implementations (ref10 / orlp / SUPERCOP).
+//! - The explicit, literal representation improves auditability and
+//!   avoids hidden dependencies or runtime initialization.
+//!
+//! This module is intentionally minimal and purely declarative.
+
 use super::field::FieldElement;
 use super::group::GePrecomp;
 
