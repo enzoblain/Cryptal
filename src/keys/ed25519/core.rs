@@ -10,10 +10,10 @@
 //! auditability, and predictable behavior.
 
 use super::ct::ConstantTimeEq;
-use super::field::FieldElement;
 use super::group::{GeCached, GeP1, GeP3};
 pub use super::scalar::Scalar;
 use crate::hash::sha512;
+use crate::keys::x25519;
 use crate::rng::Csprng;
 
 /// An Ed25519 public key.
@@ -58,7 +58,7 @@ impl PrivateKey {
     /// This value is used internally for scalar multiplication on the curve.
     /// It is not exposed publicly to avoid accidental misuse.
     #[inline]
-    pub(crate) fn scalar(self) -> Scalar {
+    pub fn scalar(self) -> Scalar {
         self.scalar
     }
 
@@ -332,103 +332,18 @@ pub fn add_scalar(
     }
 }
 
-/// Performs an X25519-compatible Diffie–Hellman key exchange.
+/// Computes a Diffie–Hellman shared secret using X25519.
 ///
-/// This function computes a shared secret between a private key and a peer
-/// public key using the Montgomery ladder on Curve25519.
+/// This function is a convenience wrapper around the X25519 key
+/// agreement implementation provided by the `x25519` module.
 ///
-/// The private scalar is first clamped according to the Curve25519
-/// specification, ensuring:
-/// - the scalar is a multiple of the cofactor,
-/// - the scalar lies in the correct subgroup,
-/// - resistance against small-subgroup and timing attacks.
+/// It derives a shared secret from:
+/// - the secret scalar contained in an Ed25519 private key, and
+/// - a peer public key represented as a 32-byte Curve25519
+///   Montgomery coordinate.
 ///
-/// The public key is interpreted as a Montgomery u-coordinate and converted
-/// into the internal field representation.
-///
-/// The core of the algorithm uses a constant-time Montgomery ladder,
-/// guaranteeing that execution flow and memory access patterns are
-/// independent of secret data.
-///
-/// The resulting shared secret is returned as a 32-byte array, suitable
-/// for use as input material to a key derivation function.
-///
-/// # Returns
-///
-/// A 32-byte shared secret derived from the private key and the peer public
-/// key.
-///
-/// # Security
-///
-/// - Runs in constant time with respect to the private scalar.
-/// - Matches the behavior of standard X25519 implementations.
-/// - Does not perform validation of the peer public key beyond the
-///   mathematical requirements of the ladder.
+/// All algorithmic details and security properties are documented
+/// in the `x25519` module.
 pub fn exchange(private: &PrivateKey, public: &PublicKey) -> [u8; 32] {
-    let mut e = [0u8; 32];
-    e.copy_from_slice(&private.scalar().to_bytes());
-
-    e[0] &= 248;
-    e[31] &= 63;
-    e[31] |= 64;
-
-    let mut x1;
-    let mut x2;
-    let mut z2;
-    let mut x3;
-    let mut z3;
-    let mut tmp0;
-    let mut tmp1;
-
-    x1 = FieldElement::from_bytes(&public.to_bytes());
-
-    tmp1 = FieldElement::ONE;
-    tmp0 = x1 + tmp1;
-    tmp1 = tmp1 - x1;
-    tmp1 = tmp1.invert();
-    x1 = tmp0 * tmp1;
-
-    x2 = FieldElement::ONE;
-    z2 = FieldElement::ZERO;
-    x3 = x1;
-    z3 = FieldElement::ONE;
-
-    let mut swap: u32 = 0;
-
-    for pos in (0..=254).rev() {
-        let b = (e[pos / 8] >> (pos & 7)) & 1;
-        let b_u32 = b as u32;
-
-        swap ^= b_u32;
-        x2.swap(&mut x3, swap);
-        z2.swap(&mut z3, swap);
-        swap = b_u32;
-
-        tmp0 = x3 - z3;
-        tmp1 = x2 - z2;
-        x2 = x2 + z2;
-        z2 = x3 + z3;
-        z3 = tmp0 * x2;
-        z2 = z2 * tmp1;
-        tmp0 = tmp1.square();
-        tmp1 = x2.square();
-        x3 = z3 + z2;
-        z2 = z3 - z2;
-        x2 = tmp1 * tmp0;
-        tmp1 = tmp1 - tmp0;
-        z2 = z2.square();
-        z3 = tmp1.mul121666();
-        x3 = x3.square();
-        tmp0 = tmp0 + z3;
-        z3 = x1 * z2;
-        z2 = tmp1 * tmp0;
-    }
-
-    x2.swap(&mut x3, swap);
-    z2.swap(&mut z3, swap);
-
-    z2 = z2.invert();
-    x2 = x2 * z2;
-
-    x2.to_bytes()
+    x25519::exchange(&private.scalar().to_bytes(), &public.to_bytes())
 }

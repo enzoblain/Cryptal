@@ -84,7 +84,7 @@
 //! Higher-level guarantees (key clamping, protocol correctness) are enforced
 //! by the layers that use this module.
 
-use crate::signatures::ed25519::field::{load_3, load_4};
+use crate::keys::ed25519::field::{load_3, load_4};
 
 use std::array;
 

@@ -1,4 +1,4 @@
-use cryptal::signatures::ed25519::{
+use cryptal::keys::ed25519::{
     Scalar, Signature, add_scalar, exchange, generate_keypair, sign, verify,
 };
 

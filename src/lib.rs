@@ -32,11 +32,17 @@
 //!   for initial entropy or environment interaction, while providing
 //!   deterministic and auditable randomness expansion.
 //!
-//! - `signatures`  
-//!   Digital signature schemes and related logic. This module groups
-//!   algorithm-specific implementations (such as Ed25519) built on top of
-//!   the crate’s primitives and hash functions, while keeping a clear
-//!   separation from lower-level components.
+//! - `keys`  
+//!   Cryptographic key types and key-related operations.
+//!
+//!   This module defines algorithm-specific key representations (such as
+//!   Ed25519 and X25519 keys), along with their derivation, serialization,
+//!   and safe transformations. It provides a clear separation between
+//!   **key material** and the cryptographic algorithms that operate on it
+//!   (signatures, key exchange, etc.).
+//!
+//!   No signing, verification, or protocol logic lives here—only key
+//!   structure and manipulation.
 //!
 //! # Design goals
 //!
@@ -52,6 +58,6 @@
 mod utils;
 
 pub mod hash;
+pub mod keys;
 pub mod primitives;
 pub mod rng;
-pub mod signatures;

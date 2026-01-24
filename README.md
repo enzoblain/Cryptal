@@ -16,16 +16,16 @@
   - [x] SHA-256 (integrity, identifiers)
   - [x] SHA-512 (integrity, identifiers)
 
+- [x] **Public-Key Cryptography**
+  - [x] Ed25519 (signatures, identity)
+  - [x] X25519 (key exchange)
+
 - [ ] **Encryption**
   - [ ] ChaCha20-Poly1305 (confidentiality, integrity)
 
 - [ ] **Key Management**
   - [ ] Argon2id (password → key)
   - [x] CSPRNG (secure randomness)
-
-- [ ] **Public-Key Cryptography**
-  - [x] Ed25519 (signatures, identity)
-  - [ ] X25519 (key exchange)
 
 - [ ] **Secret Management**
   - [ ] Shamir’s Secret Sharing (recovery, multi-device)
