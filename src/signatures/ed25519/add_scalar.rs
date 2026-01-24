@@ -1,5 +1,4 @@
 use super::group::{GeCached, GeP1, GeP3};
-use super::sc::sc_muladd;
 use crate::hash::sha512;
 use crate::signatures::ed25519::scalar::Scalar;
 
@@ -21,7 +20,8 @@ pub fn ed25519_add_scalar(
             let mut sk0 = [0u8; 32];
             sk0.copy_from_slice(&private[..32]);
 
-            sc_muladd(&mut private[..32], &sc_1, &n, &sk0);
+            let p1 = Scalar::from_mul_sum(Scalar(sc_1), Scalar(n), Scalar(sk0));
+            private[0..32].copy_from_slice(&p1.0);
 
             let mut new_sk = [0u8; 32];
             new_sk.copy_from_slice(&private[..32]);
@@ -44,7 +44,8 @@ pub fn ed25519_add_scalar(
             let mut sk0 = [0u8; 32];
             sk0.copy_from_slice(&private[..32]);
 
-            sc_muladd(&mut private[..32], &sc_1, &n, &sk0);
+            let p1 = Scalar::from_mul_sum(Scalar(sc_1), Scalar(n), Scalar(sk0));
+            private[0..32].copy_from_slice(&p1.0);
 
             let mut new_sk = [0u8; 32];
             new_sk.copy_from_slice(&private[..32]);

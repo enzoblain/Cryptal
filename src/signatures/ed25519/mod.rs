@@ -5,7 +5,6 @@ pub mod group;
 pub mod key_exchange;
 pub mod keypair;
 pub mod precomp_data;
-pub mod sc;
 pub mod scalar;
 pub mod sign;
 pub mod verify;

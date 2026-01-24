@@ -1,10 +1,6 @@
 use crate::hash::sha512;
 
-use super::{
-    group::GeP3,
-    sc::{sc_muladd, sc_reduce},
-    scalar::Scalar,
-};
+use super::{group::GeP3, scalar::Scalar};
 
 pub fn ed25519_sign(
     signature: &mut [u8; 64],
@@ -19,12 +15,10 @@ pub fn ed25519_sign(
     r_digest_input.extend_from_slice(prefix);
     r_digest_input.extend_from_slice(message);
     let r_digest = sha512(&r_digest_input);
-    let mut r_scalar = [0u8; 64];
-    r_scalar.copy_from_slice(r_digest.as_ref());
-    sc_reduce(&mut r_scalar);
 
-    let r_red = (r_scalar[..32]).try_into().unwrap();
-    let r_point = GeP3::from_scalar_mul(Scalar(r_red));
+    let r = Scalar::reduce(*r_digest.as_ref());
+
+    let r_point = GeP3::from_scalar_mul(r);
     signature[..32].copy_from_slice(&r_point.to_bytes());
 
     let mut k_digest_input = Vec::with_capacity(32 + 32 + message.len());
@@ -32,12 +26,9 @@ pub fn ed25519_sign(
     k_digest_input.extend_from_slice(public_key);
     k_digest_input.extend_from_slice(message);
     let k_digest = sha512(&k_digest_input);
-    let mut k_scalar = [0u8; 64];
-    k_scalar.copy_from_slice(k_digest.as_ref());
-    sc_reduce(&mut k_scalar);
 
+    let k = Scalar::reduce(*k_digest.as_ref());
     let sig_s: &mut [u8; 32] = (&mut signature[32..64]).try_into().unwrap();
-    let k_red: &[u8; 32] = (&k_scalar[..32]).try_into().unwrap();
-    let r_red_32: &[u8; 32] = (&r_scalar[..32]).try_into().unwrap();
-    sc_muladd(sig_s, k_red, a, r_red_32);
+
+    *sig_s = Scalar::from_mul_sum(k, Scalar(*a), r).0;
 }

@@ -1,6 +1,6 @@
 use crate::{hash::sha512, signatures::ed25519::scalar::Scalar};
 
-use super::{group::GeP3, sc::sc_reduce};
+use super::group::GeP3;
 
 #[inline(never)]
 pub fn consttime_equal(x: &[u8; 32], y: &[u8; 32]) -> bool {
@@ -12,8 +12,6 @@ pub fn consttime_equal(x: &[u8; 32], y: &[u8; 32]) -> bool {
 }
 
 pub fn ed25519_verify(signature: &[u8; 64], message: &[u8], public_key: &[u8; 32]) -> bool {
-    let mut h = [0u8; 64];
-
     if (signature[63] & 224) != 0 {
         return false;
     }
@@ -29,11 +27,11 @@ pub fn ed25519_verify(signature: &[u8; 64], message: &[u8], public_key: &[u8; 32
     buf.extend_from_slice(message);
 
     let digest = sha512(&buf);
+
+    let mut h = [0u8; 64];
     h.copy_from_slice(digest.as_ref());
 
-    sc_reduce(&mut h);
-
-    let h_red = Scalar((h[..32]).try_into().unwrap());
+    let h_red = Scalar::reduce(h);
     let s = Scalar((signature[32..64]).try_into().unwrap());
 
     let r = a.double_scalar_mul(h_red, s);
