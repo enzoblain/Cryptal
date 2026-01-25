@@ -145,7 +145,7 @@ pub fn generate_keypair() -> (PublicKey, PrivateKey) {
     let mut seed = [0u8; 32];
     Csprng::new().fill_bytes(&mut seed);
 
-    let digest = sha512(&seed).to_bytes();
+    let digest = sha512(&seed);
 
     let mut a_bytes: [u8; 32] = digest[..32].try_into().unwrap();
     a_bytes[0] &= 248;
@@ -191,7 +191,7 @@ pub fn sign(message: &[u8], public: PublicKey, private: PrivateKey) -> Signature
     r_input.extend_from_slice(&private.prefix());
     r_input.extend_from_slice(message);
 
-    let r = Scalar::reduce(*sha512(&r_input).as_ref());
+    let r = Scalar::reduce(sha512(&r_input));
 
     let r_bytes = GeP3::from_scalar_mul(r).to_bytes();
 
@@ -200,7 +200,7 @@ pub fn sign(message: &[u8], public: PublicKey, private: PrivateKey) -> Signature
     k_input.extend_from_slice(&public.to_bytes());
     k_input.extend_from_slice(message);
 
-    let k = Scalar::reduce(*sha512(&k_input).as_ref());
+    let k = Scalar::reduce(sha512(&k_input));
 
     let s = Scalar::from_mul_sum(k, a, r).0;
 
@@ -248,7 +248,7 @@ pub fn verify(signature: Signature, message: &[u8], public: PublicKey) -> bool {
     h_input.extend_from_slice(&public.to_bytes()); // A
     h_input.extend_from_slice(message);
 
-    let h = Scalar::reduce(*sha512(&h_input).as_ref());
+    let h = Scalar::reduce(sha512(&h_input));
 
     let s = Scalar(signature.0[32..].try_into().unwrap());
 
@@ -301,7 +301,7 @@ pub fn add_scalar(
             buf[..32].copy_from_slice(&private.prefix);
             buf[32..].copy_from_slice(&scalar_bytes);
 
-            private.prefix.copy_from_slice(&sha512(&buf).as_ref()[..32]);
+            private.prefix.copy_from_slice(&sha512(&buf)[..32]);
 
             *public = PublicKey(GeP3::from_scalar_mul(private.scalar).to_bytes());
         }
@@ -312,7 +312,7 @@ pub fn add_scalar(
             let mut buf = [0u8; 64];
             buf[..32].copy_from_slice(&private.prefix);
             buf[32..].copy_from_slice(&scalar_bytes);
-            private.prefix.copy_from_slice(&sha512(&buf).as_ref()[..32]);
+            private.prefix.copy_from_slice(&sha512(&buf)[..32]);
         }
 
         (None, Some(public)) => {

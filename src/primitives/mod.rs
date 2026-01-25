@@ -10,17 +10,14 @@
 //!
 //! Current primitives include:
 //! - `U256`: a fixed-size 256-bit unsigned integer
-//! - `U512`: a fixed-size 512-bit unsigned integer
 //!
 //! Additional primitives and conversion utilities may be added as the
 //! ecosystem evolves.
 
 mod u256;
-mod u512;
 
 /// Fixed-size unsigned integer primitives.
 ///
 /// These types are re-exported as the primary primitive integers used
 /// across the Nebula codebase.
 pub use u256::U256;
-pub use u512::U512;

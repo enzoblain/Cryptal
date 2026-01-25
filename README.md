@@ -12,7 +12,6 @@
 
 - [x] **Hashing & Arithmetic**
   - [x] U256 (large integers)
-  - [x] U512 (large integers)
   - [x] SHA-256 (integrity, identifiers)
   - [x] SHA-512 (integrity, identifiers)
 
@@ -23,12 +22,12 @@
 - [x] **Encryption**
   - [x] ChaCha20-Poly1305 (confidentiality, integrity)
 
-- [ ] **Key Management**
-  - [ ] Argon2id (password → key)
-  - [x] CSPRNG (secure randomness)
-
 - [x] **Secret Management**
   - [x] Shamir’s Secret Sharing (recovery, multi-device)
+
+- [ ] **Key Management**
+  - [x] CSPRNG (secure randomness)
+  - [ ] Argon2id (password → key)
 
 ---
 

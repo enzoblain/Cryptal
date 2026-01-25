@@ -7,12 +7,11 @@
 //! - the compression function operating on 1024-bit blocks
 //! - a complete SHA-512 hashing function for arbitrary-length input
 //!
-//! The implementation is designed to be minimal, explicit, and suitable
+//! The implementation is intentionally minimal, explicit, and designed
 //! for use as a low-level primitive within the Nebula ecosystem.
 
 use crate::hash::sha512::H512_INIT;
 use crate::hash::sha512::computations::all_rounds;
-use crate::primitives::U512;
 
 /// Compresses a single 1024-bit message block.
 ///
@@ -48,13 +47,14 @@ pub fn compress(block: &[u8; 128], state: &mut [u64; 8]) {
 /// - `input`: Arbitrary-length input message
 ///
 /// # Returns
-/// A 512-bit hash value represented as a `U512`.
+/// - The final SHA-512 hash as 64 bytes (`[u8; 64]`)
 ///
 /// # Notes
 /// - The implementation follows the standard Merkle–Damgård construction.
 /// - Message length is encoded as a 128-bit big-endian integer (in bits).
+/// - The internal state uses 8 × 64-bit words and is serialized in big-endian.
 /// - No heap allocations are performed.
-pub fn sha512(input: &[u8]) -> U512 {
+pub fn sha512(input: &[u8]) -> [u8; 64] {
     // Initialize hash state
     let mut state = H512_INIT;
 
@@ -84,16 +84,17 @@ pub fn sha512(input: &[u8]) -> U512 {
     }
 
     // Append the message length in bits as a 128-bit big-endian integer
-    //
-    // For practical purposes, the high 64 bits are zero unless hashing
-    // extremely large inputs (> 2⁶⁴ bits).
     let bit_len = (len as u128) << 3;
-    let len_bytes = bit_len.to_be_bytes();
-    block[112..128].copy_from_slice(&len_bytes);
+    block[112..128].copy_from_slice(&bit_len.to_be_bytes());
 
     // Final compression
     compress(&block, &mut state);
 
-    // Convert final state into a 512-bit value
-    U512::from(state)
+    // Serialize final state into big-endian bytes
+    let mut out = [0u8; 64];
+    for (i, word) in state.iter().enumerate() {
+        out[i * 8..(i + 1) * 8].copy_from_slice(&word.to_be_bytes());
+    }
+
+    out
 }
