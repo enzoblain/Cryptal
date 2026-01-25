@@ -28,7 +28,7 @@
 - [x] **Randomness**
   - [x] CSPRNG (secure randomness)
 
--[ ]
+-[ ] **Key Derivation & Unlocking** 
   - [ ] Argon2id (identity cost, human secret → strong key, password unlock, multi-device sync)
 
 ---
