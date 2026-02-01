@@ -45,24 +45,32 @@ pub fn blake2b_long(out_len: usize, input: &[u8]) -> Vec<u8> {
         return blake2b(out_len, &buf)[..out_len].to_vec();
     }
 
-    let r = out_len.div_ceil(32).saturating_sub(2);
+    // For longer outputs:
+    // 1. First hash: V0 = H^64(len || input)
+    // 2. Output first 32 bytes of V0
+    // 3. While remaining > 64: Vi = H^64(V_{i-1}), output first 32 bytes
+    // 4. Last block: H^r(V_last) where r = remaining length
 
     let mut x = Vec::with_capacity(4 + input.len());
     x.extend_from_slice(&t_le);
     x.extend_from_slice(input);
 
-    let mut v_prev = blake2b(BLAKE2B_OUT_MAX, &x).to_vec();
+    let mut last_output = blake2b(BLAKE2B_OUT_MAX, &x);
     let mut out = Vec::with_capacity(out_len);
 
-    for _ in 0..r {
-        out.extend_from_slice(&v_prev[..32]);
-        v_prev = blake2b(BLAKE2B_OUT_MAX, &v_prev).to_vec();
+    // Write first 32 bytes
+    out.extend_from_slice(&last_output[..32]);
+
+    // While remaining > 64, keep hashing and writing 32-byte chunks
+    while out_len - out.len() > BLAKE2B_OUT_MAX {
+        last_output = blake2b(BLAKE2B_OUT_MAX, &last_output);
+        out.extend_from_slice(&last_output[..32]);
     }
 
-    let last_len = out_len - 32 * r;
-    let v_last_full = blake2b(last_len, &v_prev);
-
-    out.extend_from_slice(&v_last_full[..last_len]);
+    // Last block with variable length
+    let remaining = out_len - out.len();
+    let v_last = blake2b(remaining, &last_output);
+    out.extend_from_slice(&v_last[..remaining]);
 
     out
 }
